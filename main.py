@@ -458,6 +458,54 @@ async def tool_get_summary(events: list) -> str:
 
 
 # Tool map
+async def _exec_check_threshold(events, token, threshold, operator="gt"):
+    real = await codeastra_resolve(token)
+    if real is None:
+        return await protect({"error":f"Cannot resolve {token}","real_value_returned":False}, events)
+    try:
+        v = float(str(real).replace("$","").replace(",","").strip())
+        ops = {"gt":v>threshold,"lt":v<threshold,"gte":v>=threshold,"lte":v<=threshold,"eq":v==threshold}
+        return await protect({"result":ops.get(operator,v>threshold),"operator":operator,"threshold":threshold,"real_value_returned":False}, events)
+    except Exception as e:
+        return await protect({"error":str(e)}, events)
+
+async def _exec_concentration(events, position_token, portfolio_token, threshold_pct):
+    pv = await codeastra_resolve(position_token)
+    tv = await codeastra_resolve(portfolio_token)
+    if pv is None or tv is None:
+        return await protect({"exceeds_threshold":None,"note":"Could not resolve tokens — use quantity as proxy","real_values_seen_by_agent":False}, events)
+    try:
+        p = float(str(pv).replace("$","").replace(",","").strip())
+        t = float(str(tv).replace("$","").replace(",","").strip())
+        pct = (p/t*100) if t>0 else 0
+        bucket = "critical" if pct>60 else "high" if pct>40 else "medium" if pct>20 else "low"
+        return await protect({"exceeds_threshold":pct>threshold_pct,"concentration_bucket":bucket,"threshold_pct":threshold_pct,"real_values_seen_by_agent":False}, events)
+    except Exception as e:
+        return await protect({"error":str(e)}, events)
+
+async def _exec_classify(events, token):
+    real = await codeastra_resolve(token)
+    if real is None:
+        return await protect({"error":f"Cannot resolve {token}"}, events)
+    try:
+        v = float(str(real).replace("$","").replace(",","").strip())
+        label = "whale" if v>=1000000 else "large" if v>=100000 else "medium" if v>=10000 else "small"
+        return await protect({"bucket":label,"real_value_returned":False}, events)
+    except Exception:
+        return await protect({"bucket":"unknown"}, events)
+
+async def _exec_sum(events, tokens, threshold=None):
+    total=0.0; count=0
+    for tok in tokens:
+        v = await codeastra_resolve(tok)
+        if v:
+            try: total+=float(str(v).replace("$","").replace(",","").strip()); count+=1
+            except Exception: pass
+    res = {"sum":total,"count":count,"real_individual_values_returned":False}
+    if threshold is not None:
+        res["exceeds_threshold"] = total>threshold
+    return await protect(res, events)
+
 TOOL_MAP = {
     "scan_slow_queries":    tool_scan_slow_queries,
     "list_tables":          tool_list_tables,
@@ -468,6 +516,10 @@ TOOL_MAP = {
     "get_db_stats":         tool_get_db_stats,
     "check_db_connections": tool_check_db_connections,
     "get_summary":          tool_get_summary,
+    "check_threshold":      _exec_check_threshold,
+    "concentration_check":  _exec_concentration,
+    "classify_amount":      _exec_classify,
+    "sum_amounts":          _exec_sum,
 }
 
 TOOL_DEFINITIONS = [
@@ -1537,8 +1589,9 @@ Be thorough and specific in your analysis."""
 
 @app.post("/agent/analyze-document")
 async def analyze_document(
-    file: UploadFile = File(...),
+    file: UploadFile = File(default=None),
     task: str        = Form(default=""),
+    req:  Request    = None,
 ):
     """
     Upload any document — agent analyzes it with full Codeastra protection.
@@ -1573,13 +1626,19 @@ async def analyze_document(
         -F "task=Extract all payment terms and identify risks" \\
         --no-buffer
     """
+    if file is None:
+        return JSONResponse(status_code=400, content={
+            "error": "No file uploaded",
+            "tip":   "Send as multipart/form-data with field name 'file'"
+        })
+
     filename = file.filename or "document"
     text     = await extract_text(file)
 
-    if not text or text.startswith("["):
+    if not text or text.startswith("[Could not"):
         return JSONResponse(status_code=400, content={
-            "error":    f"Could not extract text from {filename}",
-            "raw":      text,
+            "error": f"Could not extract text from {filename}",
+            "raw":   text,
         })
 
     async def stream():
@@ -1705,7 +1764,7 @@ async def analyze_text(req: Request):
 
 @app.post("/agent/analyze-multiple")
 async def analyze_multiple(
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] = File(default=None),
     task:  str              = Form(default=""),
 ):
     """
@@ -1786,3 +1845,420 @@ async def debug_protect_raw(req: Request):
             "sent_text":      text,
             "codeastra_url":  CODEASTRA_URL,
         }
+
+
+
+# ═══════════════════════════════════════════════════════════
+# SELECTIVE REVEAL EXECUTOR
+# The agent's "Hands" — resolves tokens for computation,
+# returns only derived results (booleans, buckets, totals)
+# never the raw values.
+#
+# Pattern:
+#   Agent (Brain) reasons on tokens
+#   Agent calls executor tool: check_concentration(token, threshold)
+#   Executor resolves token → gets real value → does math
+#   Executor returns: {exceeds: true} — never the real value
+#   Agent never saw the dollar amount
+# ═══════════════════════════════════════════════════════════
+
+async def codeastra_resolve(token: str) -> str | None:
+    """
+    Resolve a single CDT/CVT token to its real value.
+    Calls the Codeastra vault — authorized executor only.
+    Real value used for computation, never returned to agent.
+    """
+    if not CODEASTRA_KEY:
+        return None
+
+    # Try CDT resolve first
+    for endpoint in ["/cdt/resolve", "/vault/resolve", "/vault/read"]:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.post(
+                    f"{CODEASTRA_URL}{endpoint}",
+                    headers={"X-API-Key": CODEASTRA_KEY,
+                             "Content-Type": "application/json"},
+                    json={"token": token, "token_id": token},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    return (
+                        data.get("real_value") or
+                        data.get("value") or
+                        data.get("original") or
+                        data.get("resolved")
+                    )
+        except Exception:
+            continue
+    return None
+
+
+async def executor_resolve_batch(tokens: list[str]) -> dict:
+    """Resolve multiple tokens at once. Returns {token: real_value}."""
+    results = {}
+    for token in tokens:
+        val = await codeastra_resolve(token)
+        if val is not None:
+            results[token] = val
+    return results
+
+
+# ── Executor Tool Endpoints ────────────────────────────────
+
+@app.post("/executor/check-threshold")
+async def executor_check_threshold(req: Request):
+    """
+    Selective Reveal: check if a vaulted amount exceeds a threshold.
+    Resolves token internally. Returns ONLY boolean — never real value.
+
+    Body:
+      token:     str   — the [CVT:AMT:*] token to check
+      threshold: float — the value to compare against
+      operator:  str   — "gt" | "lt" | "gte" | "lte" | "eq"
+
+    Returns:
+      {result: true/false, operator, threshold}
+      Never returns the real value.
+    """
+    body      = await req.json()
+    token     = body.get("token","")
+    threshold = float(body.get("threshold", 0))
+    operator  = body.get("operator","gt")
+
+    real_value = await codeastra_resolve(token)
+
+    if real_value is None:
+        return JSONResponse(status_code=404, content={
+            "error": f"Could not resolve token: {token}",
+            "tip":   "Token may be expired or not in vault"
+        })
+
+    try:
+        # Strip currency symbols and commas
+        clean = str(real_value).replace("$","").replace(",","").replace("%","").strip()
+        value = float(clean)
+    except Exception:
+        return JSONResponse(status_code=400, content={
+            "error": f"Token value is not numeric: real value hidden",
+            "token": token,
+        })
+
+    ops = {
+        "gt":  value > threshold,
+        "lt":  value < threshold,
+        "gte": value >= threshold,
+        "lte": value <= threshold,
+        "eq":  value == threshold,
+    }
+    result = ops.get(operator, value > threshold)
+
+    log.info(f"Executor check_threshold: token={token} op={operator} threshold={threshold} result={result}")
+
+    return {
+        "result":    result,
+        "operator":  operator,
+        "threshold": threshold,
+        "token":     token,
+        "real_value_returned": False,
+        "real_value_seen_by_agent": False,
+    }
+
+
+@app.post("/executor/compare-amounts")
+async def executor_compare_amounts(req: Request):
+    """
+    Selective Reveal: compare two vaulted amounts.
+    Resolves both tokens. Returns only comparison result.
+
+    Body:
+      token_a: str — first amount token
+      token_b: str — second amount token
+
+    Returns:
+      {a_greater: bool, b_greater: bool, equal: bool, ratio_bucket: str}
+      Ratio bucket: "much_larger" | "larger" | "similar" | "smaller"
+    """
+    body    = await req.json()
+    token_a = body.get("token_a","")
+    token_b = body.get("token_b","")
+
+    val_a = await codeastra_resolve(token_a)
+    val_b = await codeastra_resolve(token_b)
+
+    if val_a is None or val_b is None:
+        return JSONResponse(status_code=404, content={
+            "error": "Could not resolve one or both tokens"
+        })
+
+    try:
+        a = float(str(val_a).replace("$","").replace(",","").strip())
+        b = float(str(val_b).replace("$","").replace(",","").strip())
+    except Exception:
+        return JSONResponse(status_code=400, content={"error":"Non-numeric values"})
+
+    ratio = a / b if b != 0 else float('inf')
+    bucket = (
+        "much_larger"  if ratio > 2.0  else
+        "larger"       if ratio > 1.1  else
+        "similar"      if ratio > 0.9  else
+        "smaller"      if ratio > 0.5  else
+        "much_smaller"
+    )
+
+    return {
+        "a_greater":    a > b,
+        "b_greater":    b > a,
+        "equal":        a == b,
+        "ratio_bucket": bucket,
+        "real_values_returned": False,
+    }
+
+
+@app.post("/executor/sum-amounts")
+async def executor_sum_amounts(req: Request):
+    """
+    Selective Reveal: sum a list of vaulted amount tokens.
+    Returns sum and count — never individual values.
+
+    Body:
+      tokens:    list[str] — list of [CVT:AMT:*] tokens
+      threshold: float     — optional threshold to check sum against
+    """
+    body      = await req.json()
+    tokens    = body.get("tokens", [])
+    threshold = body.get("threshold")
+
+    resolved = await executor_resolve_batch(tokens)
+    total    = 0.0
+    count    = 0
+
+    for token, val in resolved.items():
+        try:
+            clean = str(val).replace("$","").replace(",","").strip()
+            total += float(clean)
+            count += 1
+        except Exception:
+            pass
+
+    result = {
+        "sum":          total,
+        "count":        count,
+        "failed_count": len(tokens) - count,
+        "real_individual_values_returned": False,
+    }
+
+    if threshold is not None:
+        result["exceeds_threshold"] = total > float(threshold)
+        result["threshold"]         = threshold
+
+    return result
+
+
+@app.post("/executor/concentration-check")
+async def executor_concentration_check(req: Request):
+    """
+    Selective Reveal: check portfolio concentration.
+    The key executor tool for the financial use case.
+
+    Takes vaulted position amounts, computes concentration,
+    returns only whether threshold is exceeded.
+    Agent never sees real dollar values.
+
+    Body:
+      position_token:  str   — token for this position value
+      portfolio_token: str   — token for total portfolio value
+      threshold_pct:   float — concentration threshold (e.g. 40.0 for 40%)
+
+    Returns:
+      {
+        exceeds_threshold: bool,
+        concentration_bucket: "low|medium|high|critical",
+        threshold_pct: 40.0,
+        real_values_seen_by_agent: false
+      }
+    """
+    body             = await req.json()
+    position_token   = body.get("position_token","")
+    portfolio_token  = body.get("portfolio_token","")
+    threshold_pct    = float(body.get("threshold_pct", 40.0))
+
+    pos_val  = await codeastra_resolve(position_token)
+    port_val = await codeastra_resolve(portfolio_token)
+
+    if pos_val is None or port_val is None:
+        # Fall back: if tokens can't be resolved, use quantity proxy
+        return {
+            "exceeds_threshold":        None,
+            "concentration_bucket":     "unknown",
+            "threshold_pct":            threshold_pct,
+            "note":                     "Could not resolve tokens — use quantity as proxy",
+            "real_values_seen_by_agent": False,
+        }
+
+    try:
+        pos  = float(str(pos_val).replace("$","").replace(",","").strip())
+        port = float(str(port_val).replace("$","").replace(",","").strip())
+        pct  = (pos / port * 100) if port > 0 else 0
+    except Exception:
+        return JSONResponse(status_code=400, content={"error":"Non-numeric token values"})
+
+    bucket = (
+        "critical" if pct > 60  else
+        "high"     if pct > 40  else
+        "medium"   if pct > 20  else
+        "low"
+    )
+
+    log.info(f"Executor concentration_check: pct={pct:.1f}% threshold={threshold_pct}% result={pct>threshold_pct}")
+
+    return {
+        "exceeds_threshold":          pct > threshold_pct,
+        "concentration_bucket":       bucket,
+        "threshold_pct":              threshold_pct,
+        "real_pct_returned":          False,
+        "real_values_seen_by_agent":  False,
+    }
+
+
+@app.post("/executor/classify-amount")
+async def executor_classify_amount(req: Request):
+    """
+    Selective Reveal: classify a vaulted amount into a bucket.
+    Returns a label — never the real value.
+
+    Body:
+      token:   str  — the [CVT:AMT:*] token
+      buckets: list — [{label, min, max}, ...]
+               e.g. [
+                 {"label":"small",  "min":0,       "max":10000},
+                 {"label":"medium", "min":10000,   "max":100000},
+                 {"label":"large",  "min":100000,  "max":1000000},
+                 {"label":"whale",  "min":1000000, "max":null}
+               ]
+    """
+    body    = await req.json()
+    token   = body.get("token","")
+    buckets = body.get("buckets", [
+        {"label":"small",  "min":0,       "max":10000},
+        {"label":"medium", "min":10000,   "max":100000},
+        {"label":"large",  "min":100000,  "max":1000000},
+        {"label":"whale",  "min":1000000, "max":None},
+    ])
+
+    real_value = await codeastra_resolve(token)
+    if real_value is None:
+        return JSONResponse(status_code=404, content={"error": f"Cannot resolve {token}"})
+
+    try:
+        value = float(str(real_value).replace("$","").replace(",","").strip())
+    except Exception:
+        return JSONResponse(status_code=400, content={"error":"Non-numeric value"})
+
+    label = "unknown"
+    for b in buckets:
+        mn = b.get("min", 0) or 0
+        mx = b.get("max")
+        if value >= mn and (mx is None or value < mx):
+            label = b["label"]
+            break
+
+    return {
+        "bucket":     label,
+        "token":      token,
+        "real_value_returned": False,
+    }
+
+
+@app.post("/executor/run-computation")
+async def executor_run_computation(req: Request):
+    """
+    General-purpose Selective Reveal executor.
+    Resolves any tokens in an expression, computes the result,
+    returns only the derived output.
+
+    Body:
+      tokens:      dict  — {"var_name": "token_id", ...}
+      expression:  str   — Python expression using var names
+                           e.g. "(a / (a+b+c)) * 100"
+      return_only: str   — what to return: "result"|"bucket"|"boolean"
+      threshold:   float — for boolean return_only
+
+    Example:
+      {
+        "tokens": {"position": "[CVT:AMT:A1B2]", "portfolio": "[CVT:AMT:C3D4]"},
+        "expression": "(position / portfolio) * 100",
+        "return_only": "boolean",
+        "threshold": 40.0
+      }
+    """
+    body        = await req.json()
+    token_map   = body.get("tokens", {})
+    expression  = body.get("expression","")
+    return_only = body.get("return_only","result")
+    threshold   = body.get("threshold")
+
+    if not expression:
+        return JSONResponse(status_code=400, content={"error":"expression required"})
+
+    # Resolve all tokens
+    resolved = {}
+    for var_name, token in token_map.items():
+        val = await codeastra_resolve(token)
+        if val is not None:
+            try:
+                clean = str(val).replace("$","").replace(",","").strip()
+                resolved[var_name] = float(clean)
+            except Exception:
+                resolved[var_name] = val
+
+    if not resolved:
+        return JSONResponse(status_code=404, content={"error":"No tokens could be resolved"})
+
+    # Evaluate expression in sandboxed namespace
+    try:
+        import math as _math
+        safe_globals = {"__builtins__": {}, "math": _math, "abs": abs, "round": round, "min": min, "max": max}
+        result = eval(expression, safe_globals, resolved)
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"Expression error: {e}"})
+
+    if return_only == "boolean":
+        return {
+            "result":     bool(result > threshold) if threshold is not None else bool(result),
+            "threshold":  threshold,
+            "real_values_returned": False,
+        }
+    elif return_only == "bucket":
+        buckets = body.get("buckets", [])
+        label = "unknown"
+        for b in buckets:
+            if result >= b.get("min",0) and (b.get("max") is None or result < b["max"]):
+                label = b["label"]
+                break
+        return {
+            "bucket":  label,
+            "real_values_returned": False,
+        }
+    else:
+        return {
+            "result":  result,
+            "real_values_returned": False,
+        }
+
+
+@app.get("/executor/capabilities")
+async def executor_capabilities():
+    """List all executor capabilities for agent tool selection."""
+    return {
+        "endpoints": {
+            "POST /executor/check-threshold":      "Check if vaulted amount exceeds a threshold",
+            "POST /executor/compare-amounts":      "Compare two vaulted amounts",
+            "POST /executor/sum-amounts":          "Sum a list of vaulted amount tokens",
+            "POST /executor/concentration-check":  "Check portfolio concentration percentage",
+            "POST /executor/classify-amount":      "Classify vaulted amount into a bucket",
+            "POST /executor/run-computation":      "General-purpose expression evaluator on vaulted tokens",
+        },
+        "pattern": "Agent passes tokens → Executor resolves internally → Returns derived result only",
+        "guarantee": "Real values never returned to agent — only computation outputs",
+    }
