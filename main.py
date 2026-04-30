@@ -95,19 +95,31 @@ async def protect(data, events: list) -> str:
             )
 
             if r.status_code == 200:
-                result     = r.json()
-                protected  = result.get("protected_text", text)
-                detections = result.get("detections", [])
+                result    = r.json()
+                protected = result.get("protected_text", text)
 
-                for d in detections:
+                # Codeastra returns "entities" array
+                # Each entity: {token, original, type}
+                entities  = (
+                    result.get("entities") or
+                    result.get("detections") or
+                    result.get("tokens") or
+                    result.get("items") or
+                    []
+                )
+
+                for d in entities:
+                    real = d.get("original") or d.get("real") or d.get("value") or ""
+                    prev = (real[:3] + "•"*min(len(real)-5,8) + real[-2:]) if len(real)>5 else "•••"
                     events.append({
                         "type":    "intercepted",
-                        "dtype":   d.get("type", "PII"),
-                        "token":   d.get("token", ""),
-                        "preview": d.get("preview", "•••"),
+                        "dtype":   d.get("type") or d.get("field_type") or d.get("dtype") or "PII",
+                        "token":   d.get("token") or d.get("cdt_token") or "",
+                        "preview": d.get("preview") or prev,
+                        "real":    real,
                     })
 
-                log.info(f"Codeastra protected {len(detections)} values")
+                log.info(f"Codeastra protected {len(entities)} values")
                 return protected
 
             else:
@@ -1740,3 +1752,37 @@ async def analyze_multiple(
             "Access-Control-Allow-Origin": "*",
         }
     )
+
+
+
+# ── Debug endpoint — see exact raw Codeastra API response ──
+@app.post("/debug/protect-raw")
+async def debug_protect_raw(req: Request):
+    """
+    Shows the RAW response from Codeastra API.
+    Use this to verify the API is detecting PII correctly.
+
+    POST /debug/protect-raw
+    Body: {"text": "John Smith SSN 234-56-7890 email john@goldman.com"}
+    """
+    body = await req.json()
+    text = body.get("text", "")
+
+    if not CODEASTRA_KEY:
+        return {"error": "CODEASTRA_API_KEY not set"}
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{CODEASTRA_URL}/protect/text",
+            headers={
+                "X-API-Key":    CODEASTRA_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"text": text},
+        )
+        return {
+            "status_code":    r.status_code,
+            "raw_response":   r.json() if r.status_code == 200 else r.text,
+            "sent_text":      text,
+            "codeastra_url":  CODEASTRA_URL,
+        }
