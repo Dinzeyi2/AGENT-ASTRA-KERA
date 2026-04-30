@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Codeastra — Autonomous Agent Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#020205;--sf:#07070e;--sf2:#0c0c17;--bd:#13132a;--bd2:#1a1a32;--g:#00ff88;--gd:rgba(0,255,136,.1);--r:#ff3355;--rd:rgba(255,51,85,.1);--b:#3399ff;--bd3:rgba(51,153,255,.1);--y:#ffbb00;--tx:#d0d0ec;--t2:#585878;--mono:'Space Mono',monospace;--sans:'Syne',sans-serif}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:var(--bg);color:var(--tx);font-family:var(--mono);min-height:100vh}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,255,136,.007) 3px,rgba(0,255,136,.007) 4px);pointer-events:none;z-index:9999}
+
+nav{padding:14px 28px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bd);background:var(--bg);position:sticky;top:0;z-index:100}
+.logo{font-family:var(--sans);font-weight:900;font-size:16px;color:var(--g)}.logo em{color:var(--tx);font-style:normal}
+.nav-r{display:flex;align-items:center;gap:12px}
+.pill{display:flex;align-items:center;gap:5px;font-size:9px;letter-spacing:.18em;text-transform:uppercase;padding:4px 10px;border:1px solid rgba(0,255,136,.22);border-radius:2px;color:var(--g)}
+.pulse{width:5px;height:5px;border-radius:50%;background:var(--g);animation:pk 1.4s ease-in-out infinite}
+@keyframes pk{0%,100%{opacity:1}50%{opacity:.1}}
+#ast{font-size:9px;color:var(--t2)}
+
+.hero{padding:44px 28px 24px;max-width:1440px;margin:0 auto}
+.tag{font-size:9px;letter-spacing:.22em;text-transform:uppercase;color:var(--g);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.tag::before{content:'';width:18px;height:1px;background:var(--g)}
+h1{font-family:var(--sans);font-size:clamp(22px,3.2vw,44px);font-weight:900;line-height:1.06;letter-spacing:-.03em;margin-bottom:14px}
+.acc{color:var(--g)} .dim{color:var(--t2)}
+.sub{font-size:11px;color:var(--t2);line-height:1.75;max-width:540px;margin-bottom:28px}
+.tabs{display:flex;gap:1px;background:var(--sf);border:1px solid var(--bd);border-radius:3px;padding:3px;width:fit-content}
+.tab{padding:8px 16px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;background:transparent;border:none;color:var(--t2);cursor:pointer;border-radius:2px;transition:all .15s;white-space:nowrap}
+.tab:hover{color:var(--tx);background:var(--bd2)}
+.tab.on{background:var(--g);color:#000;font-weight:700}
+
+/* STATS */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;max-width:1440px;margin:20px auto;padding:0 28px}
+.sb{background:var(--sf);border:1px solid var(--bd);padding:12px 16px;text-align:center}
+.sv{font-family:var(--sans);font-size:22px;font-weight:900;display:block;line-height:1;margin-bottom:3px;transition:all .35s}
+.g{color:var(--g)} .r{color:var(--r)} .y{color:var(--y)} .b{color:var(--b)}
+.sn{font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--t2)}
+
+/* RUN BAR */
+.run{max-width:1440px;margin:0 auto 20px;padding:0 28px;display:flex;gap:10px;align-items:center}
+.pi{flex:1;background:var(--sf);border:1px solid var(--bd);padding:11px 13px;color:var(--tx);font-family:var(--mono);font-size:11px;outline:none;border-radius:2px}
+.pi:focus{border-color:var(--g)}
+.rb{padding:11px 24px;background:var(--g);color:#000;border:none;font-family:var(--sans);font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;border-radius:2px;white-space:nowrap;transition:all .18s}
+.rb:hover:not(:disabled){background:#00ffaa;box-shadow:0 5px 20px rgba(0,255,136,.3);transform:translateY(-1px)}
+.rb:disabled{opacity:.3;cursor:not-allowed}
+
+/* KEY INSIGHT BOX */
+.insight{max-width:1440px;margin:0 auto 20px;padding:0 28px}
+.ibox{background:var(--sf);border:1px solid var(--bd);padding:16px 20px;display:grid;grid-template-columns:1fr auto 1fr;gap:20px;align-items:center}
+.iside{font-size:10px;line-height:1.6}
+.ilabel{font-size:8px;letter-spacing:.15em;text-transform:uppercase;margin-bottom:6px}
+.ilabel.r{color:var(--r)} .ilabel.g{color:var(--g)}
+.icode{font-size:10px;padding:6px 10px;border-radius:2px;word-break:break-all}
+.icode.r{background:var(--rd);color:var(--r);border:1px solid rgba(255,51,85,.2)}
+.icode.g{background:var(--gd);color:var(--g);border:1px solid rgba(0,255,136,.2)}
+.iarrow{font-family:var(--sans);font-size:24px;font-weight:900;color:var(--g);text-align:center}
+.ifoot{font-size:9px;text-align:center;color:var(--t2);margin-top:6px}
+
+/* 3 SCREENS */
+.screens{max-width:1440px;margin:0 auto 24px;padding:0 28px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px}
+@media(max-width:820px){.screens{grid-template-columns:1fr}}
+.sc{background:var(--sf);border:1px solid var(--bd);display:flex;flex-direction:column;min-height:480px}
+.shd{padding:10px 13px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.stit{font-size:8px;letter-spacing:.16em;text-transform:uppercase;display:flex;align-items:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.dgr{background:var(--r);box-shadow:0 0 6px var(--r)} .dgg{background:var(--g);box-shadow:0 0 6px var(--g)} .dgb{background:var(--b);box-shadow:0 0 6px var(--b)}
+.bge{font-size:8px;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px;border-radius:2px}
+.bgr{background:var(--rd);color:var(--r);border:1px solid rgba(255,51,85,.2)} .bgg{background:var(--gd);color:var(--g);border:1px solid rgba(0,255,136,.2)} .bgb{background:var(--bd3);color:var(--b);border:1px solid rgba(51,153,255,.2)}
+.sbod{flex:1;padding:13px;overflow-y:auto;font-size:10px;line-height:1.7}
+.pbar{display:flex;gap:2px;padding:6px 13px;border-top:1px solid var(--bd);flex-shrink:0}
+.ps{flex:1;height:2px;background:var(--bd);border-radius:1px;transition:all .3s}
+.ps.ac{background:var(--g);box-shadow:0 0 5px var(--g)}.ps.co{background:rgba(0,255,136,.3)}
+
+/* Rows */
+.row{display:flex;flex-direction:column;gap:3px;padding:6px 0;border-bottom:1px solid var(--bd);animation:fi .22s forwards}
+@keyframes fi{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+.rlb{font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2)}
+.rre{color:var(--r);font-weight:700;word-break:break-all}
+.rtk{color:var(--g);font-weight:700;word-break:break-all;font-size:10px}
+.rty{display:inline-block;font-size:7px;padding:1px 5px;background:var(--rd);color:var(--r);border-radius:2px;margin-bottom:2px}
+.rty.t{background:var(--gd);color:var(--g)}
+
+/* Agent blocks */
+.block{margin:6px 0;background:var(--sf2);border:1px solid var(--bd2);border-radius:2px;animation:fi .25s forwards;overflow:hidden}
+.blk-hd{padding:6px 9px;font-size:8px;letter-spacing:.12em;text-transform:uppercase;display:flex;align-items:center;gap:5px;border-bottom:1px solid var(--bd2)}
+.blk-hd.th{color:var(--b)} .blk-hd.tc{color:var(--y)} .blk-hd.tr{color:var(--g)} .blk-hd.tz{color:var(--r)}
+.blk-bd{padding:8px 9px;font-size:10px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--tx)}
+
+/* Action items */
+.act{margin:5px 0;padding:7px 10px;border-left:2px solid var(--g);background:var(--gd);font-size:9px;animation:fi .22s forwards}
+.act.fix{border-color:var(--b);background:var(--bd3)}
+.aty{font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--g);margin-bottom:2px}
+.act.fix .aty{color:var(--b)}
+
+/* Zero Trust */
+.zt{padding:12px;background:var(--rd);border:1px solid rgba(255,51,85,.3);border-radius:2px;margin:8px 0;animation:fi .35s forwards}
+.zt-t{font-family:var(--sans);font-size:11px;font-weight:800;color:var(--r);margin-bottom:6px}
+.zt-b{font-size:9px;color:var(--t2);line-height:1.6}
+
+/* Zero counter */
+.zero{text-align:center;padding:18px;border:1px solid rgba(0,255,136,.18);background:var(--gd);margin-top:10px}
+.zbig{font-family:var(--sans);font-size:52px;font-weight:900;color:var(--g);line-height:1;text-shadow:0 0 28px rgba(0,255,136,.4);display:block}
+.zlb{font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--t2);margin-top:5px}
+
+/* Live tokenizer */
+.live{max-width:1440px;margin:0 auto 40px;padding:0 28px}
+.lgr{display:grid;grid-template-columns:1fr 1fr;gap:1px}
+@media(max-width:640px){.lgr{grid-template-columns:1fr}}
+.lp{background:var(--sf);border:1px solid var(--bd)}
+.lph{padding:8px 13px;border-bottom:1px solid var(--bd);font-size:8px;letter-spacing:.14em;text-transform:uppercase;display:flex;align-items:center;gap:6px}
+.lin{width:100%;min-height:90px;background:transparent;border:none;padding:13px;color:var(--r);font-family:var(--mono);font-size:11px;line-height:1.7;outline:none;resize:vertical}
+.lou{padding:13px;min-height:90px;font-size:11px;line-height:1.7;color:var(--g);white-space:pre-wrap;word-break:break-word}
+
+::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">CODE<em>ASTRA</em></div>
+  <div class="nav-r">
+    <span id="ast"></span>
+    <div class="pill"><div class="pulse"></div>AUTONOMOUS AGENT DEMO</div>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="tag">The Privacy Layer for Agentic AI</div>
+  <h1>Same agent.<br><span class="acc">Same work.</span><br><span class="dim">Zero data exposure.</span></h1>
+  <p class="sub">
+    This is a real autonomous AI agent doing real work — fixing databases, recovering revenue, auditing security.
+    Codeastra wraps it silently. The agent has no idea. It just works.
+    But every sensitive value it touches becomes a token before it enters Claude's context.
+  </p>
+  <div class="tabs">
+    <button class="tab on"  onclick="sd('dba',this)">🔧 DBA Agent</button>
+    <button class="tab"     onclick="sd('billing',this)">💰 Revenue Agent</button>
+    <button class="tab"     onclick="sd('fullstack',this)">⚡ Full Stack Agent</button>
+  </div>
+</div>
+
+<!-- Key insight -->
+<div class="insight">
+  <div class="ibox">
+    <div class="iside">
+      <div class="ilabel r">Without Codeastra — agent sees:</div>
+      <div class="icode r">SELECT * FROM users WHERE<br>email = 'ceo@apolloglobal.com'<br>card = '4532-0151-1283-0366'<br>ssn = '234-56-7890'</div>
+    </div>
+    <div>
+      <div class="iarrow">→</div>
+      <div class="ifoot">Codeastra<br>intercepts</div>
+    </div>
+    <div class="iside">
+      <div class="ilabel g">With Codeastra — agent sees:</div>
+      <div class="icode g">SELECT * FROM users WHERE<br>email = [CDT:EMAIL:A1B2C3D4E5]<br>card = [CDT:CARD:F6G7H8I9J0]<br>ssn = [CDT:SSN:K1L2M3N4O5]</div>
+    </div>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="sb"><span class="sv r" id="s1">0</span><span class="sn">PII Intercepted</span></div>
+  <div class="sb"><span class="sv g" id="s2">0</span><span class="sn">Tokens Minted</span></div>
+  <div class="sb"><span class="sv y" id="s3">0</span><span class="sn">Tool Calls</span></div>
+  <div class="sb"><span class="sv b" id="s4">0</span><span class="sn">Fixes Executed</span></div>
+  <div class="sb"><span class="sv g" id="s5">0</span><span class="sn">Data Leaked</span></div>
+</div>
+
+<div class="run">
+  <input class="pi" id="cp" placeholder="Override agent task (blank = default)...">
+  <button class="rb" id="rb" onclick="run()">▶ Run Autonomous Agent</button>
+</div>
+
+<div class="screens">
+  <div class="sc">
+    <div class="shd">
+      <div class="stit"><div class="dot dgr"></div>Production Reality</div>
+      <span class="bge bgr">REAL DATA</span>
+    </div>
+    <div class="sbod" id="s1x"><div style="color:var(--t2)">Real DB values. This is what the agent would see WITHOUT Codeastra.</div></div>
+    <div class="pbar"><div class="ps" id="p11"></div><div class="ps" id="p12"></div><div class="ps" id="p13"></div><div class="ps" id="p14"></div></div>
+  </div>
+
+  <div class="sc">
+    <div class="shd">
+      <div class="stit"><div class="dot dgb"></div>Agent Context Window</div>
+      <span class="bge bgb">WHAT CLAUDE SEES</span>
+    </div>
+    <div class="sbod" id="s2x"><div style="color:var(--t2)">Codeastra intercepts every tool result. Claude only receives tokens.</div></div>
+    <div class="pbar"><div class="ps" id="p21"></div><div class="ps" id="p22"></div><div class="ps" id="p23"></div><div class="ps" id="p24"></div></div>
+  </div>
+
+  <div class="sc">
+    <div class="shd">
+      <div class="stit"><div class="dot dgg"></div>Production Actions</div>
+      <span class="bge bgg">EXECUTED</span>
+    </div>
+    <div class="sbod" id="s3x"><div style="color:var(--t2)">Real fixes deployed to production appear here.</div></div>
+    <div class="pbar"><div class="ps" id="p31"></div><div class="ps" id="p32"></div><div class="ps" id="p33"></div><div class="ps" id="p34"></div></div>
+  </div>
+</div>
+
+<div class="live">
+  <div class="tag" style="margin-bottom:10px">Type any sensitive data — watch Codeastra intercept it live</div>
+  <div class="lgr">
+    <div class="lp">
+      <div class="lph"><div class="dot dgr"></div><span style="color:var(--r)">Real data (what you'd send to the agent)</span></div>
+      <textarea class="lin" id="li" placeholder="ceo@apolloglobal.com&#10;SSN 234-56-7890&#10;card 4532-0151-1283-0366&#10;sk-live-4ca4305fec929e56..." oninput="tl()"></textarea>
+    </div>
+    <div class="lp">
+      <div class="lph"><div class="dot dgg"></div><span style="color:var(--g)">What the agent sees (after Codeastra)</span></div>
+      <div class="lou" id="lo">Start typing on the left...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+var demo='dba',pi=0,ti=0,ci=0,ai=0,running=false;
+var RD={
+  dba:[
+    {ty:'EMAIL',lb:'User Email',  re:'james.dimon@jpmorgan.com'},
+    {ty:'EMAIL',lb:'User Email',  re:'david.solomon@goldmansachs.com'},
+    {ty:'EMAIL',lb:'User Email',  re:'ken.griffin@citadel.com'},
+    {ty:'CARD', lb:'Card Number', re:'4532-0151-1283-0366'},
+    {ty:'CARD', lb:'Card Number', re:'5425-2334-3010-9903'},
+    {ty:'SSN',  lb:'SSN',         re:'234-56-7890'},
+    {ty:'NAME', lb:'Name',        re:'James Dimon'},
+    {ty:'NAME', lb:'Name',        re:'David Solomon'},
+  ],
+  billing:[
+    {ty:'NAME', lb:'Customer', re:'James Dimon'},
+    {ty:'NAME', lb:'Customer', re:'Steve Schwarzman'},
+    {ty:'EMAIL',lb:'Email',    re:'steve.schwarzman@blackstone.com'},
+    {ty:'CARD', lb:'Failed',   re:'4916-3384-9572-0041'},
+    {ty:'EMAIL',lb:'Email',    re:'ray.dalio@bridgewater.com'},
+  ],
+  fullstack:[
+    {ty:'EMAIL', lb:'User',   re:'james.dimon@jpmorgan.com'},
+    {ty:'CARD',  lb:'Card',   re:'4532-0151-1283-0366'},
+    {ty:'SSN',   lb:'SSN',    re:'234-56-7890'},
+    {ty:'APIKEY',lb:'API Key',re:'sk-live-4ca4305fec929e56707928'},
+    {ty:'NAME',  lb:'Name',   re:'Ken Griffin'},
+    {ty:'EMAIL', lb:'Email',  re:'marc.rowan@apollo.com'},
+  ]
+};
+
+function g(id){return document.getElementById(id)}
+function slp(ms){return new Promise(function(r){setTimeout(r,ms)})}
+
+function sd(t,btn){
+  demo=t;
+  document.querySelectorAll('.tab').forEach(function(b){b.classList.remove('on')});
+  btn.classList.add('on');
+  clr();
+}
+
+function clr(){
+  g('s1x').innerHTML='<div style="color:var(--t2)">Real DB values — without Codeastra the agent sees this.</div>';
+  g('s2x').innerHTML='<div style="color:var(--t2)">Codeastra intercepts. Claude receives tokens only.</div>';
+  g('s3x').innerHTML='<div style="color:var(--t2)">Real fixes executed on production.</div>';
+  for(var s=1;s<=3;s++)for(var i=1;i<=4;i++){var e=g('p'+s+i);if(e)e.className='ps'}
+}
+
+function ph(s,n){
+  for(var i=1;i<=4;i++){
+    var e=g('p'+s+i);if(!e)continue;
+    e.className=i<n?'ps co':i===n?'ps ac':'ps';
+  }
+}
+
+function upd(){
+  g('s1').textContent=pi; g('s2').textContent=ti;
+  g('s3').textContent=ci; g('s4').textContent=ai;
+  g('s5').textContent=0;
+}
+
+function add(id,html){
+  var s=g(id);
+  var d=document.createElement('div');
+  d.innerHTML=html; s.appendChild(d); s.scrollTop=9999;
+}
+
+async function run(){
+  if(running)return;
+  running=true;
+  var btn=g('rb');
+  btn.disabled=true; btn.textContent='⟳ Agent Working...';
+  clr(); pi=0;ti=0;ci=0;ai=0; upd();
+
+  // Show real data in screen 1
+  var s1=g('s1x'); s1.innerHTML=''; ph(1,1);
+  var data=RD[demo]||RD.dba;
+  for(var i=0;i<data.length;i++){
+    await slp(130); pi++;upd();
+    var d=document.createElement('div');
+    d.className='row'; d.id='row'+i;
+    d.innerHTML='<span class="rty">'+data[i].ty+'</span><span class="rlb">'+data[i].lb+'</span><span class="rre">'+data[i].re+'</span>';
+    s1.appendChild(d); s1.scrollTop=9999;
+  }
+  ph(1,2);
+  add('s1x','<div style="color:var(--t2);font-size:9px;padding:8px 0;border-top:1px solid var(--bd);margin-top:4px">↑ This is what leaks into Claude WITHOUT Codeastra.</div>');
+
+  var s2=g('s2x'), s3=g('s3x');
+  s2.innerHTML=''; s3.innerHTML='';
+  add('s2x','<div style="color:var(--b);font-size:9px;padding:4px 0">Codeastra middleware active. Intercepting all tool outputs...</div>');
+
+  try{
+    var resp=await fetch('/agent/run',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({demo_type:demo,custom_task:g('cp').value})
+    });
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    var reader=resp.body.getReader(), dec=new TextDecoder();
+    ph(2,1);
+
+    while(true){
+      var r=await reader.read(); if(r.done)break;
+      var lines=dec.decode(r.value).split('\n');
+      for(var l=0;l<lines.length;l++){
+        if(!lines[l].startsWith('data: '))continue;
+        var ev; try{ev=JSON.parse(lines[l].slice(6))}catch(e){continue}
+
+        if(ev.type==='intercepted'){
+          pi++;ti++;upd();
+          // Update screen 1 — cross out real value, show token
+          var rows=s1.querySelectorAll('.rre');
+          for(var ri=0;ri<rows.length;ri++){
+            if(rows[ri].textContent.substring(0,5)===ev.real.substring(0,5)){
+              var par=rows[ri].parentNode;
+              var ty2=par.querySelector('.rty');
+              if(ty2)ty2.className='rty t';
+              rows[ri].style.textDecoration='line-through';
+              rows[ri].style.opacity='.3';
+              var tk=document.createElement('span');
+              tk.className='rtk'; tk.textContent=ev.token;
+              par.appendChild(tk); break;
+            }
+          }
+          // Show in screen 2
+          var tr=document.createElement('div');
+          tr.className='row';
+          tr.innerHTML='<span class="rty t">'+ev.dtype+' INTERCEPTED</span><span class="rtk">'+ev.token+'</span>';
+          s2.appendChild(tr); s2.scrollTop=9999;
+        }
+
+        else if(ev.type==='thinking'){
+          ph(2,2);
+          var bl=document.createElement('div');
+          bl.className='block';
+          bl.innerHTML='<div class="blk-hd th">💭 CLAUDE REASONING</div><div class="blk-bd">'+ev.text+'</div>';
+          s2.appendChild(bl); s2.scrollTop=9999;
+        }
+
+        else if(ev.type==='tool_call'){
+          ci++;upd(); ph(2,3);
+          var bl2=document.createElement('div');
+          bl2.className='block';
+          bl2.innerHTML='<div class="blk-hd tc">🔧 TOOL CALL #'+ev.call_n+': '+ev.tool+'</div>'
+            +'<div class="blk-bd" style="color:var(--t2)">'+JSON.stringify(ev.inputs)+'</div>';
+          s2.appendChild(bl2); s2.scrollTop=9999;
+        }
+
+        else if(ev.type==='tool_result'){
+          var bl3=document.createElement('div');
+          bl3.className='block';
+          bl3.innerHTML='<div class="blk-hd tr">✓ RESULT (tokens only — zero real data)</div>'
+            +'<div class="blk-bd" style="color:var(--g)">'+ev.result+'</div>';
+          s2.appendChild(bl3); s2.scrollTop=9999;
+
+          if(ev.is_action){
+            ai++;upd(); ph(3,3);
+            add('s3x','<div class="act"><div class="aty">✓ PRODUCTION ACTION — '+ev.tool.toUpperCase()+'</div><div>'+ev.result.slice(0,180)+'</div></div>');
+          }
+        }
+
+        else if(ev.type==='complete'){
+          ph(1,4);ph(2,4);ph(3,4);
+
+          if(ev.fixes&&ev.fixes.length){
+            var fl=document.createElement('div');
+            fl.className='block';
+            fl.innerHTML='<div class="blk-hd tr">📋 ALL FIXES EXECUTED</div>'
+              +'<div class="blk-bd">'+ev.fixes.join('\n')+'</div>';
+            s3.appendChild(fl);
+          }
+
+          if(ev.revenue_recovered>0){
+            add('s3x','<div class="act fix"><div class="aty">💰 REVENUE RECOVERED</div><div>$'+ev.revenue_recovered.toLocaleString()+'/month recovered autonomously</div></div>');
+          }
+
+          var zc=document.createElement('div');
+          zc.className='zero';
+          zc.innerHTML='<span class="zbig">0</span>'
+            +'<div class="zlb">real values seen by agent</div>'
+            +'<div style="color:var(--t2);font-size:9px;margin-top:8px">'
+            +ev.tool_calls+' tool calls &nbsp;•&nbsp; '
+            +ev.tokens_minted+' values intercepted &nbsp;•&nbsp; '
+            +ev.actions+' production actions</div>';
+          s3.appendChild(zc); s3.scrollTop=9999;
+        }
+
+        else if(ev.type==='error'){
+          add('s3x','<div style="color:var(--r);font-size:10px;padding:8px">Error: '+ev.message+'</div>');
+        }
+      }
+    }
+  }catch(err){
+    add('s3x','<div style="color:var(--r);font-size:10px;padding:8px">'+err.message+'<br>Set ANTHROPIC_API_KEY on Railway.</div>');
+  }
+
+  btn.disabled=false; btn.textContent='▶ Run Autonomous Agent'; running=false;
+}
+
+// Live tokenizer
+var ltt;
+function tl(){
+  clearTimeout(ltt);
+  ltt=setTimeout(async function(){
+    var txt=g('li').value;
+    if(!txt.trim()){g('lo').textContent='Start typing...';return}
+    try{
+      var r=await fetch('/tokenize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
+      var d=await r.json();
+      g('lo').textContent=d.tokenized;
+    }catch(e){
+      var res=txt;
+      var pp={EMAIL:/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,SSN:/\d{3}-\d{2}-\d{4}/g,CARD:/\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d{4}/g,APIKEY:/sk-live-[a-f0-9]{16,}/g};
+      for(var t in pp)res=res.replace(pp[t],function(m){return '[CDT:'+t+':'+Math.random().toString(16).slice(2,12).toUpperCase()+']'});
+      g('lo').textContent=res;
+    }
+  },250);
+}
+
+async function chk(){
+  try{
+    var r=await fetch('/health'),d=await r.json();
+    var e=g('ast');
+    e.textContent=d.anthropic_ready?'● claude connected':'● set ANTHROPIC_API_KEY';
+    e.style.color=d.anthropic_ready?'var(--g)':'var(--y)';
+  }catch(e){g('ast').textContent='● connecting...';g('ast').style.color='var(--t2)'}
+}
+chk();
+</script>
+</body>
+</html>
