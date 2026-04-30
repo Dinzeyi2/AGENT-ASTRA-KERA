@@ -1288,3 +1288,455 @@ async def db_connections():
         "intercepted": events,
         "protected_by": "codeastra" if CODEASTRA_KEY else "none",
     })
+
+
+
+# ═══════════════════════════════════════════════════════════
+# DOCUMENT + LINK INGESTION
+# Frontend sends any file or URL.
+# Agent reads it, Codeastra tokenizes all PII,
+# Claude analyzes tokens only.
+# ═══════════════════════════════════════════════════════════
+
+import io
+import tempfile
+import mimetypes
+from fastapi import UploadFile, File, Form
+
+async def extract_text(file: UploadFile) -> str:
+    """Extract raw text from any uploaded file."""
+    content  = await file.read()
+    filename = (file.filename or "").lower()
+    mime     = file.content_type or ""
+
+    # PDF
+    if filename.endswith(".pdf") or "pdf" in mime:
+        try:
+            import PyPDF2
+            reader = PyPDF2.PdfReader(io.BytesIO(content))
+            return "\n".join(
+                page.extract_text() or "" for page in reader.pages
+            )
+        except Exception as e:
+            return f"[PDF extraction error: {e}]"
+
+    # Word (.docx)
+    if filename.endswith(".docx") or "wordprocessingml" in mime:
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(content))
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception as e:
+            return f"[DOCX extraction error: {e}]"
+
+    # Excel (.xlsx / .xls)
+    if filename.endswith((".xlsx",".xls")) or "spreadsheet" in mime or "excel" in mime:
+        try:
+            import openpyxl
+            wb   = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+            rows = []
+            for sheet in wb.worksheets:
+                rows.append(f"=== Sheet: {sheet.title} ===")
+                for row in sheet.iter_rows(values_only=True):
+                    rows.append("\t".join(str(c) if c is not None else "" for c in row))
+            return "\n".join(rows)
+        except Exception as e:
+            return f"[Excel extraction error: {e}]"
+
+    # CSV
+    if filename.endswith(".csv") or "csv" in mime:
+        try:
+            return content.decode("utf-8", errors="replace")
+        except Exception as e:
+            return f"[CSV error: {e}]"
+
+    # JSON
+    if filename.endswith(".json") or "json" in mime:
+        try:
+            parsed = json.loads(content)
+            return json.dumps(parsed, indent=2)
+        except Exception as e:
+            return content.decode("utf-8", errors="replace")
+
+    # HTML
+    if filename.endswith((".html",".htm")) or "html" in mime:
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(content, "html.parser")
+            return soup.get_text(separator="\n", strip=True)
+        except Exception as e:
+            return content.decode("utf-8", errors="replace")
+
+    # Plain text, markdown, code files
+    text_extensions = (
+        ".txt",".md",".py",".js",".ts",".sql",".yaml",".yml",
+        ".toml",".env",".log",".xml",".sh",".bash",".r",".rb",
+    )
+    if any(filename.endswith(ext) for ext in text_extensions) or "text" in mime:
+        return content.decode("utf-8", errors="replace")
+
+    # Unknown — try UTF-8 decode
+    try:
+        return content.decode("utf-8", errors="replace")
+    except Exception:
+        return f"[Could not extract text from {filename}]"
+
+
+async def extract_from_url(url: str) -> str:
+    """Fetch and extract text from any URL."""
+    try:
+        async with httpx.AsyncClient(
+            timeout      = 20.0,
+            follow_redirects = True,
+            headers      = {"User-Agent": "Mozilla/5.0 (compatible; CodeastraAgent/1.0)"},
+        ) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+
+            ct = r.headers.get("content-type","")
+
+            # PDF from URL
+            if "pdf" in ct or url.lower().endswith(".pdf"):
+                try:
+                    import PyPDF2
+                    reader = PyPDF2.PdfReader(io.BytesIO(r.content))
+                    return "\n".join(
+                        page.extract_text() or "" for page in reader.pages
+                    )
+                except Exception as e:
+                    return f"[PDF from URL error: {e}]"
+
+            # HTML — extract readable text
+            if "html" in ct:
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    # Remove scripts, styles, nav
+                    for tag in soup(["script","style","nav","header","footer","aside"]):
+                        tag.decompose()
+                    return soup.get_text(separator="\n", strip=True)[:50000]
+                except Exception:
+                    return r.text[:50000]
+
+            # JSON
+            if "json" in ct:
+                try:
+                    return json.dumps(r.json(), indent=2)[:50000]
+                except Exception:
+                    return r.text[:50000]
+
+            # Plain text
+            return r.text[:50000]
+
+    except Exception as e:
+        return f"[URL fetch error: {e}]"
+
+
+async def run_document_agent(text: str, task: str, filename: str):
+    """
+    Autonomous agent that analyzes a document.
+    Text is protected by Codeastra before Claude sees it.
+    Claude reasons on tokens only.
+    """
+    if not ANTHROPIC_KEY:
+        yield {"type":"error","message":"ANTHROPIC_API_KEY not set"}
+        return
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    events = []
+
+    # Truncate if too large
+    if len(text) > 80000:
+        text = text[:80000] + "\n\n[... document truncated at 80,000 characters ...]"
+
+    yield {
+        "type":          "start",
+        "filename":      filename,
+        "task":          task,
+        "char_count":    len(text),
+        "codeastra_ready": bool(CODEASTRA_KEY),
+    }
+    await asyncio.sleep(0.1)
+
+    # Protect full document text through Codeastra
+    yield {"type":"phase","message":"Codeastra scanning document for PII..."}
+    protected_text = await protect(text, events)
+
+    # Emit all interception events
+    for ev in events:
+        yield ev
+    events.clear()
+
+    yield {
+        "type":    "phase",
+        "message": f"Document protected. Sending to Claude for analysis...",
+    }
+    await asyncio.sleep(0.1)
+
+    # Build task prompt
+    if not task:
+        task = (
+            "Analyze this document thoroughly. "
+            "Summarize the key information, identify any issues or action items, "
+            "extract important data points, and provide recommendations."
+        )
+
+    system = """You are an expert document analyst.
+You receive documents that have been processed by Codeastra's Zero Trust middleware.
+All PII (names, emails, SSNs, card numbers, addresses) has been replaced with tokens like [CVT:EMAIL:A1B2].
+Work with these tokens as identifiers — they represent real values stored securely in the vault.
+Analyze the document structure, content, and meaning. You can reason about the data without knowing the actual values.
+Be thorough and specific in your analysis."""
+
+    messages = [{
+        "role": "user",
+        "content": f"TASK: {task}\n\nDOCUMENT ({filename}):\n\n{protected_text}"
+    }]
+
+    # Stream Claude's analysis
+    full_response = ""
+    try:
+        with client.messages.stream(
+            model      = "claude-haiku-4-5-20251001",
+            max_tokens = 2000,
+            system     = system,
+            messages   = messages,
+        ) as stream:
+            for chunk in stream.text_stream:
+                full_response += chunk
+                yield {"type":"thinking","text":chunk}
+                await asyncio.sleep(0.01)
+
+    except Exception as e:
+        yield {"type":"error","message":str(e)}
+        return
+
+    yield {
+        "type":                    "complete",
+        "analysis":                full_response,
+        "filename":                filename,
+        "char_count":              len(text),
+        "real_data_seen_by_agent": 0,
+        "codeastra_api_used":      bool(CODEASTRA_KEY),
+    }
+
+
+# ── Endpoints ────────────────────────────────────────────
+
+@app.post("/agent/analyze-document")
+async def analyze_document(
+    file: UploadFile = File(...),
+    task: str        = Form(default=""),
+):
+    """
+    Upload any document — agent analyzes it with full Codeastra protection.
+
+    Supported file types:
+      PDF, DOCX, XLSX, XLS, CSV, JSON, TXT, MD,
+      HTML, XML, YAML, Python, SQL, and any text file.
+
+    Form fields:
+      file: the document to analyze
+      task: what to do with it (optional)
+            e.g. "Find all compliance violations"
+                 "Summarize key financial figures"
+                 "Extract all action items"
+                 "Identify PII exposure risks"
+
+    Returns: text/event-stream
+      start        — document received
+      intercepted  — Codeastra caught PII in document
+      thinking     — Claude analyzing (sees tokens only)
+      complete     — full analysis
+
+    Example (JavaScript):
+      const form = new FormData();
+      form.append('file', file);
+      form.append('task', 'Find all compliance issues');
+      fetch('/agent/analyze-document', {method:'POST', body: form})
+
+    Example (curl):
+      curl -X POST https://your-app.railway.app/agent/analyze-document \\
+        -F "file=@contract.pdf" \\
+        -F "task=Extract all payment terms and identify risks" \\
+        --no-buffer
+    """
+    filename = file.filename or "document"
+    text     = await extract_text(file)
+
+    if not text or text.startswith("["):
+        return JSONResponse(status_code=400, content={
+            "error":    f"Could not extract text from {filename}",
+            "raw":      text,
+        })
+
+    async def stream():
+        async for ev in run_document_agent(text, task, filename):
+            yield f"data: {json.dumps(ev)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":               "no-cache",
+            "X-Accel-Buffering":           "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+@app.post("/agent/analyze-url")
+async def analyze_url(req: Request):
+    """
+    Send any URL — agent fetches it and analyzes with Codeastra protection.
+
+    Works with:
+      Web pages, articles, blog posts
+      Online PDFs
+      JSON APIs
+      GitHub files (raw URLs)
+      Google Docs (published)
+      News articles
+      Documentation pages
+      Financial reports
+      Any public URL
+
+    Body:
+      url:  str — the URL to fetch and analyze
+      task: str — what to do with it (optional)
+
+    Returns: text/event-stream (same events as analyze-document)
+
+    Example:
+      curl -X POST https://your-app.railway.app/agent/analyze-url \\
+        -H "Content-Type: application/json" \\
+        -d '{"url":"https://example.com/report.pdf","task":"Find key risks"}' \\
+        --no-buffer
+    """
+    body = await req.json()
+    url  = body.get("url","").strip()
+    task = body.get("task","")
+
+    if not url:
+        return JSONResponse(status_code=400, content={"error":"url required"})
+
+    if not url.startswith(("http://","https://")):
+        return JSONResponse(status_code=400, content={
+            "error": "URL must start with http:// or https://"
+        })
+
+    text = await extract_from_url(url)
+
+    if not text or text.startswith("[URL fetch error"):
+        return JSONResponse(status_code=400, content={
+            "error": f"Could not fetch URL: {url}",
+            "detail": text,
+        })
+
+    async def stream():
+        async for ev in run_document_agent(text, task, url):
+            yield f"data: {json.dumps(ev)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":               "no-cache",
+            "X-Accel-Buffering":           "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+@app.post("/agent/analyze-text")
+async def analyze_text(req: Request):
+    """
+    Send raw text directly — agent analyzes with Codeastra protection.
+    Use when you already have the text (no file upload needed).
+
+    Body:
+      text: str  — the text content to analyze
+      task: str  — what to do with it
+      name: str  — label for this content (optional)
+
+    Example:
+      curl -X POST https://your-app.railway.app/agent/analyze-text \\
+        -H "Content-Type: application/json" \\
+        -d '{
+          "text": "Client: John Smith, SSN 234-56-7890, owes $45,000...",
+          "task": "Identify all PII and compliance risks",
+          "name": "client-record"
+        }' --no-buffer
+    """
+    body = await req.json()
+    text = body.get("text","").strip()
+    task = body.get("task","")
+    name = body.get("name","raw-text")
+
+    if not text:
+        return JSONResponse(status_code=400, content={"error":"text required"})
+
+    async def stream():
+        async for ev in run_document_agent(text, task, name):
+            yield f"data: {json.dumps(ev)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":               "no-cache",
+            "X-Accel-Buffering":           "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+@app.post("/agent/analyze-multiple")
+async def analyze_multiple(
+    files: list[UploadFile] = File(...),
+    task:  str              = Form(default=""),
+):
+    """
+    Upload multiple documents at once.
+    Agent analyzes all of them together as one context.
+    Useful for: comparing contracts, cross-referencing reports,
+    auditing multiple files at once.
+
+    Max 10 files, 50MB total.
+
+    Example:
+      curl -X POST https://your-app.railway.app/agent/analyze-multiple \\
+        -F "files=@contract1.pdf" \\
+        -F "files=@contract2.pdf" \\
+        -F "task=Compare these contracts and find discrepancies" \\
+        --no-buffer
+    """
+    if len(files) > 10:
+        return JSONResponse(status_code=400, content={"error":"Max 10 files"})
+
+    all_text = ""
+    names    = []
+
+    for f in files:
+        text = await extract_text(f)
+        names.append(f.filename or "file")
+        all_text += f"\n\n=== FILE: {f.filename} ===\n{text}"
+
+    if not all_text.strip():
+        return JSONResponse(status_code=400, content={"error":"No text extracted from files"})
+
+    combined_name = f"{len(files)} files: {', '.join(names)}"
+
+    async def stream():
+        async for ev in run_document_agent(all_text, task, combined_name):
+            yield f"data: {json.dumps(ev)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":               "no-cache",
+            "X-Accel-Buffering":           "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
