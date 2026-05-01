@@ -44,6 +44,12 @@ CODEASTRA_URL = os.getenv("CODEASTRA_URL", "https://app.codeastra.dev")
 DATABASE_URL  = os.getenv("DATABASE_URL", "")
 PORT          = int(os.getenv("PORT", 8080))
 
+# Initialize OpenAI Agents SDK with API key
+# This is required for traces to appear in platform.openai.com/logs
+if OPENAI_KEY:
+    from agents import set_default_openai_key
+    set_default_openai_key(OPENAI_KEY)
+
 app = FastAPI(title="Codeastra Agent — OpenAI Full Integration")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
@@ -789,6 +795,105 @@ async def run_openai_agent(
         "real_data_seen_by_gpt": 0 if codeastra_active else "⚠️ YES",
         "message":               "Trace visible at platform.openai.com/traces",
     }
+
+
+
+async def extract_text_from_file(file) -> str:
+    """Extract raw text from any uploaded file."""
+    import io as _io
+    content  = await file.read()
+    filename = (file.filename or "").lower()
+    mime     = file.content_type or ""
+
+    if filename.endswith(".pdf") or "pdf" in mime:
+        try:
+            import PyPDF2
+            reader = PyPDF2.PdfReader(_io.BytesIO(content))
+            return "\n".join(p.extract_text() or "" for p in reader.pages)
+        except Exception as e:
+            return f"[PDF error: {e}]"
+
+    if filename.endswith(".docx"):
+        try:
+            import docx
+            doc = docx.Document(_io.BytesIO(content))
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception as e:
+            return f"[DOCX error: {e}]"
+
+    if filename.endswith((".xlsx", ".xls")):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+            rows = []
+            for sheet in wb.worksheets:
+                rows.append(f"=== {sheet.title} ===")
+                for row in sheet.iter_rows(values_only=True):
+                    rows.append("\t".join(str(c) if c is not None else "" for c in row))
+            return "\n".join(rows)
+        except Exception as e:
+            return f"[Excel error: {e}]"
+
+    if filename.endswith(".csv"):
+        return content.decode("utf-8", errors="replace")
+
+    if filename.endswith((".html", ".htm")):
+        try:
+            from bs4 import BeautifulSoup
+            return BeautifulSoup(content, "html.parser").get_text("\n", strip=True)
+        except Exception:
+            return content.decode("utf-8", errors="replace")
+
+    # JSON
+    if filename.endswith(".json"):
+        try:
+            return json.dumps(json.loads(content), indent=2)
+        except Exception:
+            return content.decode("utf-8", errors="replace")
+
+    # Default: UTF-8 text
+    return content.decode("utf-8", errors="replace")
+
+
+async def extract_text_from_url(url: str) -> str:
+    """Fetch and extract text from any URL."""
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; CodeastraAgent/1.0)"}
+        ) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            ct = r.headers.get("content-type", "")
+
+            if "pdf" in ct or url.lower().endswith(".pdf"):
+                try:
+                    import io as _io, PyPDF2
+                    reader = PyPDF2.PdfReader(_io.BytesIO(r.content))
+                    return "\n".join(p.extract_text() or "" for p in reader.pages)
+                except Exception as e:
+                    return f"[PDF error: {e}]"
+
+            if "html" in ct:
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    for tag in soup(["script", "style", "nav", "header", "footer"]):
+                        tag.decompose()
+                    return soup.get_text("\n", strip=True)[:50000]
+                except Exception:
+                    return r.text[:50000]
+
+            if "json" in ct:
+                try:
+                    return json.dumps(r.json(), indent=2)[:50000]
+                except Exception:
+                    return r.text[:50000]
+
+            return r.text[:50000]
+
+    except Exception as e:
+        return f"[URL fetch error: {e}]"
 
 
 async def run_document_agent(text, task, filename,
