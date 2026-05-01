@@ -28,9 +28,18 @@ import asyncpg
 from openai import AsyncOpenAI
 # OpenAI Agents SDK — required for traces to appear in platform.openai.com/traces
 from agents import (
-    Agent, Runner, function_tool, trace, gen_trace_id, RunConfig, flush_traces
+    Agent, Runner, function_tool, trace, gen_trace_id, RunConfig
 )
 import agents as _agents_sdk
+
+# flush_traces available in openai-agents >= 0.0.15
+try:
+    from agents import flush_traces as _flush_traces
+    def flush_traces():
+        _flush_traces()
+except ImportError:
+    def flush_traces():
+        pass  # older SDK — traces sent automatically in background
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
