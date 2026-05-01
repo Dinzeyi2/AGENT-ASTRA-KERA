@@ -731,31 +731,21 @@ async def run_openai_agent(
         ],
     )
 
-    run_config = RunConfig(
-        workflow_name            = f"codeastra-{task_type}",
-        trace_id                 = trace_id,
-        trace_include_sensitive_data = False,  # ← never include real data in traces
-        trace_metadata           = {
-            "task_type":        task_type,
-            "codeastra_active": str(codeastra_active),
-            "trace_id":         agent_trace.id,
-        },
-    )
-
-    # ── Run with Agents SDK — traces auto-sent to OpenAI ─────
+    # ── Run with Agents SDK ───────────────────────────────────
+    # Runner.run() automatically creates traces visible in
+    # platform.openai.com/logs → Agent Traces
     try:
-        with trace(
-            workflow_name = f"codeastra-{task_type}",
-            trace_id      = trace_id,
-            metadata      = {"codeastra_active": str(codeastra_active)},
-        ):
-            result = await Runner.run(
-                starting_agent = dba_agent,
-                input          = task,
-                max_turns      = 20,
-                run_config     = run_config,
-            )
-        # flush_traces() required in FastAPI — traces are batched, must force export
+        result = await Runner.run(
+            starting_agent = dba_agent,
+            input          = task,
+            max_turns      = 20,
+            run_config     = RunConfig(
+                workflow_name                = f"codeastra-{task_type}",
+                trace_id                     = trace_id,
+                trace_metadata               = {"codeastra_active": str(codeastra_active)},
+                trace_include_sensitive_data = False,
+            ),
+        )
         flush_traces()
 
     except Exception as e:
@@ -984,13 +974,17 @@ Be thorough and specific."""
     )
     _doc_input = "TASK: " + (task or "Analyze this document thoroughly.") + "\n\nDOCUMENT (" + filename + "):\n\n" + protected_text
     try:
-        with trace("codeastra-document-analysis", trace_id=doc_trace_id):
-            doc_result = await Runner.run(
-                starting_agent = doc_agent,
-                input          = _doc_input,
-                max_turns      = 1,
-                run_config     = doc_run_config,
-            )
+        doc_result = await Runner.run(
+            starting_agent = doc_agent,
+            input          = _doc_input,
+            max_turns      = 1,
+            run_config     = RunConfig(
+                workflow_name                = "codeastra-document-analysis",
+                trace_id                     = doc_trace_id,
+                trace_metadata               = {"filename": filename, "codeastra_active": str(codeastra_active)},
+                trace_include_sensitive_data = False,
+            ),
+        )
         flush_traces()
         full = str(doc_result.final_output) if doc_result.final_output else ""
         yield {"type":"thinking","text":full,"trace_id":agent_trace.id}
