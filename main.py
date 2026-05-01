@@ -603,45 +603,103 @@ async def run_openai_agent(
         tool_start = time.time()
 
         try:
-            # Use OpenAI Chat Completions with tool calling
-            # (Responses API beta — use chat completions for stability)
-            response = await client.chat.completions.create(
+            # OpenAI Responses API — appears in platform.openai.com/logs
+            # Build input for Responses API format
+            response = await client.responses.create(
                 model    = "gpt-4o",
-                messages = messages,
-                tools    = OPENAI_TOOLS,
+                input    = messages,
+                tools    = [
+                    {
+                        "type":     "function",
+                        "name":     t["function"]["name"],
+                        "description": t["function"]["description"],
+                        "parameters":  t["function"]["parameters"],
+                    }
+                    for t in OPENAI_TOOLS
+                ],
             )
         except Exception as e:
-            trace.add_step("error", {"message":str(e)})
-            yield {"type":"error","message":str(e)}
-            return
+            # Fallback to Chat Completions if Responses API unavailable
+            try:
+                response = await client.chat.completions.create(
+                    model    = "gpt-4o",
+                    messages = messages,
+                    tools    = OPENAI_TOOLS,
+                )
+                # Normalise to common format
+                response._is_chat = True
+            except Exception as e2:
+                trace.add_step("error", {"message":str(e2)})
+                yield {"type":"error","message":str(e2)}
+                return
 
-        msg    = response.choices[0].message
-        finish = response.choices[0].finish_reason
+        # ── Parse response — handle both Responses API and Chat Completions ──
+        is_chat = getattr(response, "_is_chat", False)
 
-        # Log completion
         comp_id = f"comp_{uuid.uuid4().hex[:8]}"
-        COMPLETIONS[comp_id] = {
-            "id":              comp_id,
-            "trace_id":        trace.id,
-            "model":           "gpt-4o",
-            "finish_reason":   finish,
-            "usage":           response.usage.model_dump() if response.usage else {},
-            "timestamp":       datetime.utcnow().isoformat(),
-        }
+
+        if is_chat:
+            # Chat Completions format
+            msg    = response.choices[0].message
+            finish = response.choices[0].finish_reason
+            COMPLETIONS[comp_id] = {
+                "id":            comp_id,
+                "trace_id":      trace.id,
+                "model":         "gpt-4o",
+                "api":           "chat_completions",
+                "finish_reason": finish,
+                "usage":         response.usage.model_dump() if response.usage else {},
+                "timestamp":     datetime.utcnow().isoformat(),
+            }
+            thinking_text = msg.content or ""
+            tool_call_items = msg.tool_calls or []
+            done = (finish == "stop" or not tool_call_items)
+        else:
+            # Responses API format
+            COMPLETIONS[comp_id] = {
+                "id":            comp_id,
+                "trace_id":      trace.id,
+                "model":         "gpt-4o",
+                "api":           "responses",
+                "response_id":   getattr(response, "id", ""),
+                "status":        getattr(response, "status", ""),
+                "usage":         getattr(response, "usage", {}),
+                "timestamp":     datetime.utcnow().isoformat(),
+            }
+            # Extract text and tool calls from Responses API output
+            thinking_text   = ""
+            tool_call_items = []
+            done            = False
+            output          = getattr(response, "output", [])
+
+            for item in output:
+                item_type = getattr(item, "type", "")
+                if item_type == "message":
+                    for content in getattr(item, "content", []):
+                        if getattr(content, "type", "") == "output_text":
+                            thinking_text += getattr(content, "text", "")
+                elif item_type == "function_call":
+                    tool_call_items.append(item)
+
+            if not tool_call_items:
+                done = True
+
+            # Update messages for next Responses API turn
+            messages = [{"role":"user","content":task}]  # Responses API is stateless
 
         # Emit thinking
-        if msg.content:
-            step = trace.add_step("thinking", {"text":msg.content,"completion_id":comp_id})
+        if thinking_text:
+            step = trace.add_step("thinking", {"text":thinking_text,"completion_id":comp_id})
             yield {
                 "type":          "thinking",
-                "text":          msg.content,
+                "text":          thinking_text,
                 "trace_id":      trace.id,
                 "trace_step":    step["step"],
                 "completion_id": comp_id,
             }
             await asyncio.sleep(0.02)
 
-        if finish == "stop" or not msg.tool_calls:
+        if done:
             trace.add_step("agent_done", {"completion_id":comp_id})
             yield {"type":"agent_done","trace_id":trace.id}
             break
@@ -649,11 +707,20 @@ async def run_openai_agent(
         # Process tool calls
         tool_results_for_api = []
 
-        for tc in msg.tool_calls:
-            tool_name   = tc.function.name
-            tool_inputs = json.loads(tc.function.arguments or "{}")
-            calls_n    += 1
-            tc_start    = time.time()
+        for tc in tool_call_items:
+            if is_chat:
+                tool_name   = tc.function.name
+                tool_inputs = json.loads(tc.function.arguments or "{}")
+                tc_id       = tc.id
+            else:
+                # Responses API function_call item
+                tool_name   = getattr(tc, "name", "")
+                args_raw    = getattr(tc, "arguments", "{}")
+                tool_inputs = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                tc_id       = getattr(tc, "call_id", getattr(tc, "id", uuid.uuid4().hex[:8]))
+
+            calls_n  += 1
+            tc_start  = time.time()
 
             step = trace.add_step("tool_call", {
                 "tool":   tool_name,
@@ -685,7 +752,7 @@ async def run_openai_agent(
             tc_duration = int((time.time() - tc_start) * 1000)
             trace.add_tool_call(tool_name, tool_inputs, result[:200], tc_duration)
 
-            # Emit and record interceptions
+            # Emit interceptions
             for ev in events:
                 if ev["type"] == "intercepted":
                     intercept_n += 1
@@ -719,14 +786,26 @@ async def run_openai_agent(
             }
             await asyncio.sleep(0.05)
 
-            tool_results_for_api.append({
-                "tool_call_id": tc.id,
-                "role":         "tool",
-                "content":      result,
-            })
+            if is_chat:
+                tool_results_for_api.append({
+                    "tool_call_id": tc_id,
+                    "role":         "tool",
+                    "content":      result,
+                })
+            else:
+                # Responses API tool result format
+                tool_results_for_api.append({
+                    "type":    "function_call_output",
+                    "call_id": tc_id,
+                    "output":  result,
+                })
 
-        messages.append(msg)
-        messages.extend(tool_results_for_api)
+        if is_chat:
+            messages.append(msg)
+            messages.extend(tool_results_for_api)
+        else:
+            # For Responses API — append tool results to next input
+            messages = list(messages) + tool_results_for_api
 
     # Complete trace
     trace.complete()
