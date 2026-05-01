@@ -651,6 +651,60 @@ class ChatKitThread:
 # Uses the new Responses API for richer trace data
 # ═══════════════════════════════════════════════════════════
 
+async def auto_reveal_tokens(text: str) -> dict:
+    """
+    After agent finishes — extract all tokens from text,
+    resolve them via Codeastra vault, return real values.
+    This runs AFTER the agent context is closed.
+    Agent never sees the resolved values.
+    Only the frontend receives them.
+    """
+    import re
+    # Find all CVT/CDT tokens in the text
+    token_pattern = re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9]{8,}\]|cdt_[a-z]+_[bto]_[a-z0-9]+')
+    tokens_found  = list(set(token_pattern.findall(text)))
+
+    if not tokens_found:
+        return {"revealed": {}, "count": 0}
+
+    revealed = {}
+    for token in tokens_found:
+        real = await codeastra_resolve(token)
+        if real:
+            revealed[token] = real
+
+    return {
+        "revealed": revealed,
+        "count":    len(revealed),
+        "note":     "Resolved after agent completed — agent never saw these values",
+    }
+
+
+async def reveal_from_trace(trace_obj) -> dict:
+    """
+    After agent completes — collect all tokens that were
+    intercepted during the run and resolve them all at once.
+    Returns the full reveal map for the frontend.
+    """
+    if not trace_obj or not trace_obj.intercepted:
+        return {"revealed": {}, "count": 0}
+
+    tokens   = [i["token"] for i in trace_obj.intercepted if i.get("token")]
+    revealed = {}
+
+    for token in tokens:
+        real = await codeastra_resolve(token)
+        if real:
+            revealed[token] = real
+
+    return {
+        "revealed":  revealed,
+        "count":     len(revealed),
+        "tokens_found": len(tokens),
+        "note": "Real values resolved after agent closed — agent never saw these",
+    }
+
+
 async def run_openai_agent(
     task_type:        str,
     custom_task:      str  = "",
@@ -842,6 +896,11 @@ async def run_openai_agent(
                    trace_id=agent_trace.id, codeastra_active=codeastra_active,
                    intercepted_count=intercept_n)
 
+    # ── Auto-reveal — resolve all tokens AFTER agent is done ──
+    # Agent context is closed. Real values go to frontend ONLY.
+    # Agent never sees these — it already finished.
+    reveal_map = await reveal_from_trace(agent_trace)
+
     yield {
         "type":                  "complete",
         "trace_id":              agent_trace.id,
@@ -857,6 +916,7 @@ async def run_openai_agent(
         "codeastra_active":      codeastra_active,
         "real_data_seen_by_gpt": 0 if codeastra_active else "⚠️ YES",
         "message":               "Trace visible at platform.openai.com/traces",
+        "revealed":              reveal_map,
     }
 
 
@@ -1060,6 +1120,9 @@ async def run_document_agent(text, task, filename,
             intercepted_count=len(dt.intercepted),
         )
 
+    # ── Auto-reveal — resolve all tokens AFTER agent is done ──
+    reveal_map = await reveal_from_trace(dt)
+
     yield {
         "type":                    "complete",
         "trace_id":                dt.id,
@@ -1071,6 +1134,7 @@ async def run_document_agent(text, task, filename,
         "codeastra_active":        codeastra_active,
         "intercepted":             len(dt.intercepted),
         "real_data_seen_by_gpt":   0 if codeastra_active else "⚠️ YES",
+        "revealed":                reveal_map,
     }
 
 
