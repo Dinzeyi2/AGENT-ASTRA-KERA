@@ -208,22 +208,32 @@ async def codeastra_resolve(token: str):
 
 async def codeastra_resolve_batch(tokens: list) -> dict:
     """
-    Resolve multiple tokens at once via Codeastra vault/resolve-batch.
+    Resolve ALL tokens in ONE API call via vault/resolve-batch.
+    720 tokens = 1 HTTP request, not 720.
     Returns {token: real_value} dict.
     """
-    if not CODEASTRA_KEY: return {}
+    if not CODEASTRA_KEY or not tokens:
+        return {}
     try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
+        async with httpx.AsyncClient(timeout=30.0) as c:
             r = await c.post(
                 f"{CODEASTRA_URL}/vault/resolve-batch",
-                headers={"X-API-Key": CODEASTRA_KEY,
+                headers={"X-API-Key":    CODEASTRA_KEY,
                          "Content-Type": "application/json"},
                 json={"tokens": tokens},
             )
             if r.status_code == 200:
-                return r.json().get("resolved", {})
-    except Exception:
-        pass
+                data = r.json()
+                # Handle both response formats
+                return (
+                    data.get("resolved") or
+                    data.get("results") or
+                    data.get("values") or
+                    {}
+                )
+            log.warning(f"vault/resolve-batch returned {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        log.warning(f"vault/resolve-batch error: {e}")
     return {}
 
 
@@ -682,26 +692,26 @@ async def auto_reveal_tokens(text: str) -> dict:
 
 async def reveal_from_trace(trace_obj) -> dict:
     """
-    After agent completes — collect all tokens that were
-    intercepted during the run and resolve them all at once.
-    Returns the full reveal map for the frontend.
+    After agent completes — resolve ALL tokens in ONE batch call.
+    Uses vault/resolve-batch instead of one call per token.
+    Agent is already done. Real values go to frontend only.
     """
     if not trace_obj or not trace_obj.intercepted:
         return {"revealed": {}, "count": 0}
 
-    tokens   = [i["token"] for i in trace_obj.intercepted if i.get("token")]
-    revealed = {}
+    tokens = list(set(i["token"] for i in trace_obj.intercepted if i.get("token")))
 
-    for token in tokens:
-        real = await codeastra_resolve(token)
-        if real:
-            revealed[token] = real
+    if not tokens:
+        return {"revealed": {}, "count": 0}
+
+    # ONE batch call instead of N individual calls
+    revealed = await codeastra_resolve_batch(tokens)
 
     return {
-        "revealed":  revealed,
-        "count":     len(revealed),
+        "revealed":     revealed,
+        "count":        len(revealed),
         "tokens_found": len(tokens),
-        "note": "Real values resolved after agent closed — agent never saw these",
+        "note":         "Resolved after agent completed — agent never saw these values",
     }
 
 
