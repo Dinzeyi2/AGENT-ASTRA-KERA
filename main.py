@@ -743,7 +743,7 @@ async def run_openai_agent(
                 workflow_name                = f"codeastra-{task_type}",
                 trace_id                     = trace_id,
                 trace_metadata               = {"codeastra_active": str(codeastra_active)},
-                trace_include_sensitive_data = False,
+                trace_include_sensitive_data = True,  # tokens visible in OpenAI trace — not real data
             ),
         )
         flush_traces()
@@ -990,7 +990,7 @@ async def run_document_agent(text, task, filename,
                     "filename":         filename,
                     "codeastra_active": str(codeastra_active),
                 },
-                trace_include_sensitive_data = False,
+                trace_include_sensitive_data = True,  # tokens visible in OpenAI trace — not real data
             ),
         )
         flush_traces()
