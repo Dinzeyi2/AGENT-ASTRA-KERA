@@ -914,44 +914,47 @@ async def extract_text_from_url(url: str) -> str:
 async def run_document_agent(text, task, filename,
                               codeastra_active=True,
                               thread_id=None):
-    events = []
+    """
+    Analyze any document using OpenAI Agents SDK.
+    Codeastra tokenizes all PII before GPT sees it.
+    Trace appears in platform.openai.com/logs → Agent Traces.
+    """
+    events    = []
+    dt        = AgentTrace("document", task or "Analyze document", "gpt-4o", codeastra_active)
+    TRACES[dt.id] = dt
+
     if len(text) > 80000:
         text = text[:80000] + "\n\n[... truncated ...]"
 
-    trace = AgentTrace("document", task or "Analyze document", "gpt-4o", codeastra_active)
-    TRACES[trace.id] = trace
-
     yield {
-        "type":"start","trace_id":trace.id,
-        "filename":filename,"task":task,
-        "codeastra_active":codeastra_active,
-        "char_count":len(text),
+        "type":             "start",
+        "trace_id":         dt.id,
+        "filename":         filename,
+        "task":             task,
+        "codeastra_active": codeastra_active,
+        "char_count":       len(text),
+        "mode":             "PROTECTED" if codeastra_active else "⚠️ UNPROTECTED",
     }
+    dt.add_step("document_received", {"filename": filename, "chars": len(text)})
 
-    trace.add_step("document_received",{"filename":filename,"chars":len(text)})
-
+    # Step 1 — Codeastra protects the document
     if codeastra_active:
         yield {"type":"phase","message":"Codeastra scanning document for PII..."}
         protected_text = await protect(text, events, True)
         for ev in events:
             if ev["type"] == "intercepted":
-                trace.add_interception(ev["dtype"],ev["token"],ev["preview"])
-                step = trace.add_step("codeastra_intercept",ev)
-                yield {**ev,"trace_id":trace.id,"trace_step":step["step"]}
+                dt.add_interception(ev["dtype"], ev["token"], ev["preview"])
+                s = dt.add_step("codeastra_intercept", ev)
+                yield {**ev, "trace_id": dt.id, "trace_step": s["step"]}
             else:
                 yield ev
         events.clear()
     else:
-        yield {"type":"warning","message":"⚠️ Codeastra OFF — document unprotected"}
+        yield {"type":"warning","message":"⚠️ Codeastra OFF — document sent unprotected"}
         protected_text = text
 
-    yield {"type":"phase","message":"Sending to GPT-4o..."}
-    trace.add_step("sending_to_gpt",{"model":"gpt-4o","codeastra_active":codeastra_active})
-
-    system = """You are an expert document analyst working through Codeastra's Zero Trust middleware.
-All PII has been replaced with tokens like [CVT:EMAIL:A1B2C3].
-Work with tokens as identifiers. Analyze structure, content, and meaning.
-Be thorough and specific."""
+    yield {"type":"phase","message":"Sending to GPT-4o via Agents SDK..."}
+    dt.add_step("sending_to_gpt", {"model":"gpt-4o","codeastra_active":codeastra_active})
 
     if not OPENAI_KEY:
         yield {"type":"error","message":"OPENAI_API_KEY not set"}
@@ -960,62 +963,68 @@ Be thorough and specific."""
     import openai as _oai
     _oai.api_key = OPENAI_KEY
 
+    # Step 2 — Run through Agents SDK (trace auto-sent to OpenAI)
     doc_agent = Agent(
         name         = "Codeastra Document Analyst",
-        instructions = system,
-        model        = "gpt-4o",
+        instructions = (
+            "You are an expert document analyst working through Codeastra Zero Trust middleware. "
+            "All PII has been replaced with tokens like [CVT:EMAIL:A1B2C3]. "
+            "Work with tokens as identifiers. Analyze structure, content, and meaning. "
+            "Be thorough and specific."
+        ),
+        model = "gpt-4o",
     )
-    doc_trace_id   = gen_trace_id()
-    doc_run_config = RunConfig(
-        workflow_name                = "codeastra-document-analysis",
-        trace_id                     = doc_trace_id,
-        trace_include_sensitive_data = False,
-        trace_metadata               = {"filename": filename, "codeastra_active": str(codeastra_active)},
-    )
-    _doc_input = "TASK: " + (task or "Analyze this document thoroughly.") + "\n\nDOCUMENT (" + filename + "):\n\n" + protected_text
+
+    doc_input    = "TASK: " + (task or "Analyze this document thoroughly.") + "\n\nDOCUMENT (" + filename + "):\n\n" + protected_text
+    dt_trace_id  = gen_trace_id()
+
     try:
         doc_result = await Runner.run(
             starting_agent = doc_agent,
-            input          = _doc_input,
+            input          = doc_input,
             max_turns      = 1,
             run_config     = RunConfig(
                 workflow_name                = "codeastra-document-analysis",
-                trace_id                     = doc_trace_id,
-                trace_metadata               = {"filename": filename, "codeastra_active": str(codeastra_active)},
+                trace_id                     = dt_trace_id,
+                trace_metadata               = {
+                    "filename":         filename,
+                    "codeastra_active": str(codeastra_active),
+                },
                 trace_include_sensitive_data = False,
             ),
         )
         flush_traces()
         full = str(doc_result.final_output) if doc_result.final_output else ""
-        yield {"type":"thinking","text":full,"trace_id":agent_trace.id}
     except Exception as e:
         yield {"type":"error","message":str(e)}
+        dt.complete()
         return
 
-    trace.add_step("analysis_complete",{"length":len(full)})
-    trace.complete()
+    s = dt.add_step("analysis_complete", {"length": len(full)})
+    yield {"type":"thinking","text":full,"trace_id":dt.id,"trace_step":s["step"]}
+
+    dt.complete()
 
     if thread_id and thread_id in THREADS:
-        THREADS[thread_id].add_message("agent", full, model="gpt-4o",
-            trace_id=trace.id, codeastra_active=codeastra_active,
-            intercepted_count=len(trace.intercepted))
+        THREADS[thread_id].add_message(
+            "agent", full, model="gpt-4o",
+            trace_id=dt.id, codeastra_active=codeastra_active,
+            intercepted_count=len(dt.intercepted),
+        )
 
     yield {
-        "type":"complete",
-        "trace_id":trace.id,
-        "trace_url":f"/traces/{trace.id}",
-        "thread_id":thread_id,
-        "filename":filename,
-        "codeastra_active":codeastra_active,
-        "intercepted":len(trace.intercepted),
-        "real_data_seen_by_gpt":0 if codeastra_active else "⚠️ YES",
-        "openai_logs_url":"https://platform.openai.com/logs",
+        "type":                    "complete",
+        "trace_id":                dt.id,
+        "openai_trace_id":         dt_trace_id,
+        "trace_url":               f"/traces/{dt.id}",
+        "openai_traces_url":       "https://platform.openai.com/logs",
+        "thread_id":               thread_id,
+        "filename":                filename,
+        "codeastra_active":        codeastra_active,
+        "intercepted":             len(dt.intercepted),
+        "real_data_seen_by_gpt":   0 if codeastra_active else "⚠️ YES",
     }
 
-
-# ═══════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════
 
 def _stream(gen):
     async def s():
