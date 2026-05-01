@@ -26,6 +26,11 @@ from collections import defaultdict
 import httpx
 import asyncpg
 from openai import AsyncOpenAI
+# OpenAI Agents SDK — required for traces to appear in platform.openai.com/traces
+from agents import (
+    Agent, Runner, function_tool, trace, gen_trace_id, RunConfig
+)
+import agents as _agents_sdk
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -577,360 +582,213 @@ async def run_openai_agent(
     conversation_id:  str  = None,
     thread_id:        str  = None,
 ) -> AsyncGenerator[dict, None]:
+    """
+    Real autonomous agent using OpenAI Agents SDK.
+    Traces automatically appear in platform.openai.com/traces.
+    Every tool result goes through Codeastra before GPT sees it.
+    """
 
     if not OPENAI_KEY:
         yield {"type":"error","message":"OPENAI_API_KEY not set"}
         return
 
-    client = AsyncOpenAI(api_key=OPENAI_KEY)
-    events = []
-    task   = custom_task or TASK_PROMPTS.get(task_type, TASK_PROMPTS["dba"])
+    # Set OpenAI API key for Agents SDK
+    import openai
+    openai.api_key = OPENAI_KEY
 
-    # Create trace
-    trace = AgentTrace(task_type, task, "gpt-4o", codeastra_active)
-    TRACES[trace.id] = trace
+    events          = []
+    task            = custom_task or TASK_PROMPTS.get(task_type, TASK_PROMPTS["dba"])
+    agent_trace     = AgentTrace(task_type, task, "gpt-4o", codeastra_active)
+    TRACES[agent_trace.id] = agent_trace
 
-    # Link to conversation if provided
-    conv = None
-    if conversation_id and conversation_id in CONVERSATIONS:
-        conv = CONVERSATIONS[conversation_id]
-        conv.add_turn("user", task, trace.id)
+    # Link to conversation/thread
+    conv   = CONVERSATIONS.get(conversation_id) if conversation_id else None
+    thread = THREADS.get(thread_id) if thread_id else None
+    if conv:   conv.add_turn("user", task, agent_trace.id)
+    if thread: thread.add_message("user", task, codeastra_active=codeastra_active)
 
-    # Link to thread if provided
-    thread = None
-    if thread_id and thread_id in THREADS:
-        thread = THREADS[thread_id]
-        thread.add_message("user", task, codeastra_active=codeastra_active)
+    trace_id = gen_trace_id()
 
     yield {
         "type":             "start",
-        "trace_id":         trace.id,
+        "trace_id":         agent_trace.id,
+        "openai_trace_id":  trace_id,
         "conversation_id":  conversation_id,
         "thread_id":        thread_id,
         "task":             task,
         "model":            "gpt-4o",
         "codeastra_active": codeastra_active,
         "mode":             "PROTECTED" if codeastra_active else "⚠️ UNPROTECTED",
-        "openai_logs_url":  "https://platform.openai.com/logs",
+        "openai_traces_url":"https://platform.openai.com/traces",
         "timestamp":        datetime.utcnow().isoformat(),
     }
 
-    trace.add_step("agent_start", {
-        "task":             task,
-        "codeastra_active": codeastra_active,
-    })
-
+    agent_trace.add_step("agent_start", {"task":task,"codeastra_active":codeastra_active})
     await asyncio.sleep(0.1)
 
-    messages  = [
-        {"role":"system","content":SYSTEM},
-        {"role":"user",  "content":task},
-    ]
-    calls_n   = 0
+    calls_n     = 0
     intercept_n = 0
 
-    for iteration in range(20):
-        iter_step = trace.add_step("iteration", {"n": iteration+1})
-        yield {"type":"iteration","n":iteration+1,"trace_id":trace.id}
+    # ── Build Agents SDK tools ────────────────────────────────
+    # Each tool wraps our real DB tool functions.
+    # Codeastra intercepts the result before it returns to the agent.
 
-        tool_start = time.time()
+    # We use a shared state dict to pass events back
+    _shared = {"events": events, "calls_n": 0, "intercept_n": 0,
+               "codeastra_active": codeastra_active}
 
-        try:
-            # OpenAI Responses API — appears in platform.openai.com/logs
-            # Build input for Responses API format
-            response = await client.responses.create(
-                model    = "gpt-4o",
-                input    = messages,
-                store    = True,   # ← required for traces to appear in OpenAI dashboard
-                tools    = [
-                    {
-                        "type":        "function",
-                        "name":        t["function"]["name"],
-                        "description": t["function"]["description"],
-                        "parameters":  t["function"]["parameters"],
-                    }
-                    for t in OPENAI_TOOLS
-                ],
+    @function_tool
+    async def list_tables() -> str:
+        """List all database tables with sizes. Start here."""
+        _shared["calls_n"] += 1
+        return await tool_list_tables(_shared["events"], _shared["codeastra_active"])
+
+    @function_tool
+    async def scan_slow_queries() -> str:
+        """Scan production database for slow queries using pg_stat_statements."""
+        _shared["calls_n"] += 1
+        return await tool_scan_slow_queries(_shared["events"], _shared["codeastra_active"])
+
+    @function_tool
+    async def inspect_table(table: str) -> str:
+        """Inspect a real database table: schema, indexes, row count, sample rows."""
+        _shared["calls_n"] += 1
+        return await tool_inspect_table(_shared["events"], table, _shared["codeastra_active"])
+
+    @function_tool
+    async def create_index(table: str, column: str) -> str:
+        """Create a real database index on a column. Runs CREATE INDEX CONCURRENTLY."""
+        _shared["calls_n"] += 1
+        return await tool_create_index(_shared["events"], table, column, _shared["codeastra_active"])
+
+    @function_tool
+    async def run_query(sql: str) -> str:
+        """Run a read-only SELECT query on the real database."""
+        _shared["calls_n"] += 1
+        return await tool_run_query(_shared["events"], sql, _shared["codeastra_active"])
+
+    @function_tool
+    async def get_db_stats() -> str:
+        """Get real database health statistics: cache hit ratio, deadlocks, connections."""
+        _shared["calls_n"] += 1
+        return await tool_get_db_stats(_shared["events"], _shared["codeastra_active"])
+
+    @function_tool
+    async def get_summary() -> str:
+        """Get summary of everything accomplished. Call at the end."""
+        _shared["calls_n"] += 1
+        return await tool_get_summary(_shared["events"], _shared["codeastra_active"])
+
+    @function_tool
+    async def check_threshold(token: str, threshold: float, operator: str = "gt") -> str:
+        """Check if a vaulted amount token exceeds a threshold. Returns boolean only — never real value."""
+        _shared["calls_n"] += 1
+        return await tool_check_threshold(_shared["events"], token, threshold, operator, _shared["codeastra_active"])
+
+    @function_tool
+    async def concentration_check(position_token: str, portfolio_token: str, threshold_pct: float) -> str:
+        """Check portfolio concentration. Returns bucket and boolean — never real dollar values."""
+        _shared["calls_n"] += 1
+        return await tool_concentration_check(_shared["events"], position_token, portfolio_token, threshold_pct, _shared["codeastra_active"])
+
+    # ── Build the Agent ───────────────────────────────────────
+    dba_agent = Agent(
+        name         = "Codeastra DBA Agent",
+        instructions = SYSTEM,
+        model        = "gpt-4o",
+        tools        = [
+            list_tables, scan_slow_queries, inspect_table,
+            create_index, run_query, get_db_stats,
+            get_summary, check_threshold, concentration_check,
+        ],
+    )
+
+    run_config = RunConfig(
+        workflow_name            = f"codeastra-{task_type}",
+        trace_id                 = trace_id,
+        trace_include_sensitive_data = False,  # ← never include real data in traces
+        trace_metadata           = {
+            "task_type":        task_type,
+            "codeastra_active": str(codeastra_active),
+            "trace_id":         agent_trace.id,
+        },
+    )
+
+    # ── Run with Agents SDK — traces auto-sent to OpenAI ─────
+    try:
+        with trace(
+            workflow_name = f"codeastra-{task_type}",
+            trace_id      = trace_id,
+            metadata      = {"codeastra_active": str(codeastra_active)},
+        ):
+            result = await Runner.run(
+                starting_agent = dba_agent,
+                input          = task,
+                max_turns      = 20,
+                run_config     = run_config,
             )
-        except Exception as e:
-            # Fallback to Chat Completions if Responses API unavailable
-            try:
-                response = await client.chat.completions.create(
-                    model    = "gpt-4o",
-                    messages = messages,
-                    tools    = OPENAI_TOOLS,
-                )
-                # Normalise to common format
-                response._is_chat = True
-            except Exception as e2:
-                trace.add_step("error", {"message":str(e2)})
-                yield {"type":"error","message":str(e2)}
-                return
 
-        # ── Parse response — handle both Responses API and Chat Completions ──
-        is_chat = getattr(response, "_is_chat", False)
+    except Exception as e:
+        agent_trace.add_step("error", {"message":str(e)})
+        yield {"type":"error","message":str(e),"trace_id":agent_trace.id}
+        agent_trace.complete()
+        return
 
-        comp_id = f"comp_{uuid.uuid4().hex[:8]}"
+    # ── Emit events from shared state ────────────────────────
+    calls_n = _shared["calls_n"]
 
-        if is_chat:
-            # Chat Completions format
-            msg    = response.choices[0].message
-            finish = response.choices[0].finish_reason
-            COMPLETIONS[comp_id] = {
-                "id":            comp_id,
-                "trace_id":      trace.id,
-                "model":         "gpt-4o",
-                "api":           "chat_completions",
-                "finish_reason": finish,
-                "usage":         response.usage.model_dump() if response.usage else {},
-                "timestamp":     datetime.utcnow().isoformat(),
-            }
-            thinking_text = msg.content or ""
-            tool_call_items = msg.tool_calls or []
-            done = (finish == "stop" or not tool_call_items)
-        else:
-            # Responses API format
-            COMPLETIONS[comp_id] = {
-                "id":            comp_id,
-                "trace_id":      trace.id,
-                "model":         "gpt-4o",
-                "api":           "responses",
-                "response_id":   getattr(response, "id", ""),
-                "status":        getattr(response, "status", ""),
-                "usage":         getattr(response, "usage", {}),
-                "timestamp":     datetime.utcnow().isoformat(),
-            }
-            # Extract text and tool calls from Responses API output
-            thinking_text   = ""
-            tool_call_items = []
-            done            = False
-            output          = getattr(response, "output", [])
-
-            for item in output:
-                item_type = getattr(item, "type", "")
-                if item_type == "message":
-                    for content in getattr(item, "content", []):
-                        if getattr(content, "type", "") == "output_text":
-                            thinking_text += getattr(content, "text", "")
-                elif item_type == "function_call":
-                    tool_call_items.append(item)
-
-            if not tool_call_items:
-                done = True
-
-            # Update messages for next Responses API turn
-            messages = [{"role":"user","content":task}]  # Responses API is stateless
-
-        # Emit thinking
-        if thinking_text:
-            step = trace.add_step("thinking", {"text":thinking_text,"completion_id":comp_id})
-            yield {
-                "type":          "thinking",
-                "text":          thinking_text,
-                "trace_id":      trace.id,
-                "trace_step":    step["step"],
-                "completion_id": comp_id,
-            }
-            await asyncio.sleep(0.02)
-
-        if done:
-            trace.add_step("agent_done", {"completion_id":comp_id})
-            yield {"type":"agent_done","trace_id":trace.id}
-            break
-
-        # Process tool calls
-        tool_results_for_api = []
-
-        for tc in tool_call_items:
-            if is_chat:
-                tool_name   = tc.function.name
-                tool_inputs = json.loads(tc.function.arguments or "{}")
-                tc_id       = tc.id
-            else:
-                # Responses API function_call item
-                tool_name   = getattr(tc, "name", "")
-                args_raw    = getattr(tc, "arguments", "{}")
-                tool_inputs = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-                tc_id       = getattr(tc, "call_id", getattr(tc, "id", uuid.uuid4().hex[:8]))
-
-            calls_n  += 1
-            tc_start  = time.time()
-
-            step = trace.add_step("tool_call", {
-                "tool":   tool_name,
-                "inputs": tool_inputs,
-                "n":      calls_n,
+    # Drain any remaining interception events
+    for ev in _shared["events"]:
+        if ev["type"] == "intercepted":
+            intercept_n += 1
+            agent_trace.add_interception(ev["dtype"], ev["token"], ev["preview"])
+            step = agent_trace.add_step("codeastra_intercept", {
+                "dtype":   ev["dtype"],
+                "token":   ev["token"],
+                "preview": ev["preview"],
+                "n":       intercept_n,
             })
-            yield {
-                "type":       "tool_call",
-                "tool":       tool_name,
-                "inputs":     tool_inputs,
-                "n":          calls_n,
-                "trace_id":   trace.id,
-                "trace_step": step["step"],
-            }
-            await asyncio.sleep(0.15)
-
-            # Execute tool — Codeastra intercepts result
-            fn = TOOL_FNS.get(tool_name)
-            if fn:
-                try:
-                    kwargs = {k: tool_inputs[k] for k in tool_inputs}
-                    kwargs["active"] = codeastra_active
-                    result = await fn(events, **kwargs)
-                except Exception as e:
-                    result = await protect({"error":str(e)}, events, codeastra_active)
-            else:
-                result = await protect({"error":f"Unknown: {tool_name}"}, events, codeastra_active)
-
-            tc_duration = int((time.time() - tc_start) * 1000)
-            trace.add_tool_call(tool_name, tool_inputs, result[:200], tc_duration)
-
-            # Emit interceptions
-            for ev in events:
-                if ev["type"] == "intercepted":
-                    intercept_n += 1
-                    trace.add_interception(ev["dtype"], ev["token"], ev["preview"])
-                    step2 = trace.add_step("codeastra_intercept", {
-                        "dtype":   ev["dtype"],
-                        "token":   ev["token"],
-                        "preview": ev["preview"],
-                        "n":       intercept_n,
-                    })
-                    yield {**ev, "trace_id":trace.id, "trace_step":step2["step"]}
-                else:
-                    yield ev
-            events.clear()
-
-            is_action = tool_name in {"create_index","analyze_table"}
-            res_step  = trace.add_step("tool_result", {
-                "tool":        tool_name,
-                "result":      result[:300],
-                "is_action":   is_action,
-                "duration_ms": tc_duration,
-            })
-            yield {
-                "type":       "tool_result",
-                "tool":       tool_name,
-                "result":     result[:400],
-                "is_action":  is_action,
-                "duration_ms": tc_duration,
-                "trace_id":   trace.id,
-                "trace_step": res_step["step"],
-            }
-            await asyncio.sleep(0.05)
-
-            if is_chat:
-                tool_results_for_api.append({
-                    "tool_call_id": tc_id,
-                    "role":         "tool",
-                    "content":      result,
-                })
-            else:
-                # Responses API tool result format
-                tool_results_for_api.append({
-                    "type":    "function_call_output",
-                    "call_id": tc_id,
-                    "output":  result,
-                })
-
-        if is_chat:
-            messages.append(msg)
-            messages.extend(tool_results_for_api)
+            yield {**ev, "trace_id":agent_trace.id, "trace_step":step["step"]}
         else:
-            # For Responses API — append tool results to next input
-            messages = list(messages) + tool_results_for_api
+            yield ev
+    _shared["events"].clear()
 
-    # Complete trace
-    trace.complete()
+    # Emit final output
+    final_output = str(result.final_output) if result.final_output else ""
+    if final_output:
+        step = agent_trace.add_step("thinking", {"text":final_output})
+        yield {
+            "type":       "thinking",
+            "text":       final_output,
+            "trace_id":   agent_trace.id,
+            "trace_step": step["step"],
+        }
 
-    # Add agent reply to conversation / thread
-    summary_text = f"Completed {calls_n} tool calls. {intercept_n} values intercepted by Codeastra. Real data seen: 0"
-    if conv:
-        conv.add_turn("agent", summary_text, trace.id)
-    if thread:
-        thread.add_message("agent", summary_text, model="gpt-4o",
-                           trace_id=trace.id,
-                           codeastra_active=codeastra_active,
-                           intercepted_count=intercept_n)
+    # Complete
+    agent_trace.complete()
+
+    summary_text = f"Completed. {calls_n} tool calls. {intercept_n} values intercepted. Real data seen: 0"
+    if conv:   conv.add_turn("agent", summary_text, agent_trace.id)
+    if thread: thread.add_message("agent", summary_text, model="gpt-4o",
+                   trace_id=agent_trace.id, codeastra_active=codeastra_active,
+                   intercepted_count=intercept_n)
 
     yield {
         "type":                  "complete",
-        "trace_id":              trace.id,
-        "trace_url":             f"/traces/{trace.id}",
+        "trace_id":              agent_trace.id,
+        "openai_trace_id":       trace_id,
+        "openai_traces_url":     "https://platform.openai.com/traces",
+        "trace_url":             f"/traces/{agent_trace.id}",
         "conversation_id":       conversation_id,
         "thread_id":             thread_id,
         "tool_calls":            calls_n,
         "intercepted":           intercept_n,
-        "total_steps":           len(trace.steps),
-        "duration_ms":           trace.total_duration_ms,
+        "total_steps":           len(agent_trace.steps),
+        "duration_ms":           agent_trace.total_duration_ms,
         "codeastra_active":      codeastra_active,
         "real_data_seen_by_gpt": 0 if codeastra_active else "⚠️ YES",
-        "openai_logs_url":       "https://platform.openai.com/logs",
+        "message":               "Trace visible at platform.openai.com/traces",
     }
-
-
-# ═══════════════════════════════════════════════════════════
-# DOCUMENT AGENT
-# ═══════════════════════════════════════════════════════════
-
-async def extract_text_from_file(file: UploadFile) -> str:
-    content  = await file.read()
-    filename = (file.filename or "").lower()
-    mime     = file.content_type or ""
-    if filename.endswith(".pdf") or "pdf" in mime:
-        try:
-            import PyPDF2
-            reader = PyPDF2.PdfReader(io.BytesIO(content))
-            return "\n".join(p.extract_text() or "" for p in reader.pages)
-        except Exception as e: return f"[PDF error: {e}]"
-    if filename.endswith(".docx"):
-        try:
-            import docx
-            doc = docx.Document(io.BytesIO(content))
-            return "\n".join(p.text for p in doc.paragraphs)
-        except Exception as e: return f"[DOCX error: {e}]"
-    if filename.endswith((".xlsx",".xls")):
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-            rows = []
-            for sheet in wb.worksheets:
-                rows.append(f"=== {sheet.title} ===")
-                for row in sheet.iter_rows(values_only=True):
-                    rows.append("\t".join(str(c) if c is not None else "" for c in row))
-            return "\n".join(rows)
-        except Exception as e: return f"[Excel error: {e}]"
-    if filename.endswith(".csv"): return content.decode("utf-8", errors="replace")
-    if filename.endswith((".html",".htm")):
-        try:
-            from bs4 import BeautifulSoup
-            return BeautifulSoup(content,"html.parser").get_text("\n",strip=True)
-        except Exception: return content.decode("utf-8", errors="replace")
-    return content.decode("utf-8", errors="replace")
-
-
-async def extract_text_from_url(url: str) -> str:
-    try:
-        async with httpx.AsyncClient(timeout=20.0,follow_redirects=True,
-                                     headers={"User-Agent":"Mozilla/5.0"}) as client:
-            r = await client.get(url)
-            ct = r.headers.get("content-type","")
-            if "pdf" in ct or url.lower().endswith(".pdf"):
-                try:
-                    import PyPDF2
-                    reader = PyPDF2.PdfReader(io.BytesIO(r.content))
-                    return "\n".join(p.extract_text() or "" for p in reader.pages)
-                except Exception as e: return f"[PDF error: {e}]"
-            if "html" in ct:
-                try:
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(r.text,"html.parser")
-                    for tag in soup(["script","style","nav","header","footer"]): tag.decompose()
-                    return soup.get_text("\n",strip=True)[:50000]
-                except Exception: return r.text[:50000]
-            return r.text[:50000]
-    except Exception as e: return f"[URL error: {e}]"
 
 
 async def run_document_agent(text, task, filename,
