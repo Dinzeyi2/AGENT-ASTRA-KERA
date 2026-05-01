@@ -73,6 +73,19 @@ COMPLETIONS   = {}   # completion_id → completion record
 @app.on_event("startup")
 async def startup():
     global db_pool
+
+    # Set OpenAI API key for Agents SDK tracing
+    if OPENAI_KEY:
+        import openai as _oai
+        _oai.api_key = OPENAI_KEY
+        # Explicitly set for Agents SDK
+        try:
+            from agents.tracing import set_tracing_export_api_key
+            set_tracing_export_api_key(OPENAI_KEY)
+            log.info("✅ Agents SDK tracing configured")
+        except Exception as e:
+            log.warning(f"Agents SDK tracing setup: {e}")
+
     if DATABASE_URL:
         try:
             db_pool = await asyncpg.create_pool(
@@ -1035,11 +1048,13 @@ async def health():
         except Exception: pass
     return {
         "status":          "healthy",
+        "version":         "agents-sdk-v2-traces",
         "openai_ready":    bool(OPENAI_KEY),
         "codeastra_ready": bool(CODEASTRA_KEY),
         "codeastra_live":  codeastra_ok,
         "db_ready":        db_pool is not None,
-        "openai_logs_url": "https://platform.openai.com/logs",
+        "sdk_traces":      True,
+        "openai_traces_url": "https://platform.openai.com/logs",
     }
 
 
