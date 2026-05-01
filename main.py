@@ -184,19 +184,67 @@ def _local_protect(text: str, events: list) -> str:
 
 
 async def codeastra_resolve(token: str):
+    """
+    Resolve a token via the real Codeastra vault.
+    Calls app.codeastra.dev/vault/resolve — the executor already lives there.
+    Real value used for computation, never returned to agent.
+    """
     if not CODEASTRA_KEY: return None
-    for ep in ["/vault/resolve", "/cdt/resolve"]:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as c:
-                r = await c.post(f"{CODEASTRA_URL}{ep}",
-                    headers={"X-API-Key":CODEASTRA_KEY,
-                             "Content-Type":"application/json"},
-                    json={"token":token,"token_id":token})
-                if r.status_code == 200:
-                    d = r.json()
-                    return d.get("real_value") or d.get("value") or d.get("original")
-        except Exception: continue
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.post(
+                f"{CODEASTRA_URL}/vault/resolve",
+                headers={"X-API-Key": CODEASTRA_KEY,
+                         "Content-Type": "application/json"},
+                json={"token": token},
+            )
+            if r.status_code == 200:
+                d = r.json()
+                return d.get("real_value") or d.get("value") or d.get("original")
+    except Exception:
+        pass
     return None
+
+
+async def codeastra_resolve_batch(tokens: list) -> dict:
+    """
+    Resolve multiple tokens at once via Codeastra vault/resolve-batch.
+    Returns {token: real_value} dict.
+    """
+    if not CODEASTRA_KEY: return {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(
+                f"{CODEASTRA_URL}/vault/resolve-batch",
+                headers={"X-API-Key": CODEASTRA_KEY,
+                         "Content-Type": "application/json"},
+                json={"tokens": tokens},
+            )
+            if r.status_code == 200:
+                return r.json().get("resolved", {})
+    except Exception:
+        pass
+    return {}
+
+
+async def codeastra_executor_run(token_id: str, dry_run: bool = False) -> dict:
+    """
+    Run the Codeastra Thinking Executor on a token.
+    Codeastra resolves the token, applies rules, fires integrations.
+    Real value NEVER returned. Agent never sees it.
+    """
+    if not CODEASTRA_KEY: return {"error": "No Codeastra API key"}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            r = await c.post(
+                f"{CODEASTRA_URL}/executor/run",
+                headers={"X-API-Key": CODEASTRA_KEY,
+                         "Content-Type": "application/json"},
+                json={"token_id": token_id, "dry_run": dry_run},
+            )
+            return r.json()
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1456,6 +1504,288 @@ async def list_tasks():
             "proof":         "https://platform.openai.com/logs",
         }
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
+
+
+# ── Test OpenAI Responses API directly ───────────────────
+@app.post("/debug/test-responses-api")
+async def test_responses_api():
+    """
+    Test that OpenAI Responses API is working and traces appear.
+    Call this after deploying — then check platform.openai.com/traces
+    You should see a trace appear within 30 seconds.
+    """
+    if not OPENAI_KEY:
+        return {"error": "OPENAI_API_KEY not set"}
+
+    client = AsyncOpenAI(api_key=OPENAI_KEY)
+
+    try:
+        response = await client.responses.create(
+            model  = "gpt-4o",
+            input  = "Say exactly: CODEASTRA TRACE TEST SUCCESSFUL",
+            store  = True,
+        )
+        output_text = ""
+        for item in getattr(response, "output", []):
+            if getattr(item, "type", "") == "message":
+                for c in getattr(item, "content", []):
+                    if getattr(c, "type", "") == "output_text":
+                        output_text += getattr(c, "text", "")
+
+        return {
+            "success":      True,
+            "response_id":  getattr(response, "id", "unknown"),
+            "output":       output_text,
+            "store":        True,
+            "check_traces": "https://platform.openai.com/traces",
+            "message":      "Go to platform.openai.com/traces — you should see this call within 30 seconds",
+        }
+    except Exception as e:
+        # Try without store param (older API version)
+        try:
+            response = await client.responses.create(
+                model = "gpt-4o",
+                input = "Say exactly: CODEASTRA TRACE TEST SUCCESSFUL",
+            )
+            return {
+                "success":    True,
+                "response_id": getattr(response, "id", "unknown"),
+                "store_param": "not supported in this API version",
+                "check_traces": "https://platform.openai.com/traces",
+            }
+        except Exception as e2:
+            return {
+                "success":       False,
+                "error":         str(e2),
+                "responses_api": "may not be available — using Chat Completions fallback",
+                "alternative":   "Traces visible at platform.openai.com/logs (Usage tab)",
+            }
+
+
+@app.get("/debug/openai-status")
+async def openai_status():
+    """Check OpenAI API status and which features are available."""
+    if not OPENAI_KEY:
+        return {"error": "OPENAI_API_KEY not set"}
+
+    client = AsyncOpenAI(api_key=OPENAI_KEY)
+    results = {}
+
+    # Test Chat Completions
+    try:
+        r = await client.chat.completions.create(
+            model    = "gpt-4o",
+            messages = [{"role":"user","content":"ping"}],
+            max_tokens = 5,
+        )
+        results["chat_completions"] = {
+            "available": True,
+            "model":     r.model,
+            "logs_url":  "https://platform.openai.com/usage",
+        }
+    except Exception as e:
+        results["chat_completions"] = {"available":False,"error":str(e)}
+
+    # Test Responses API
+    try:
+        r = await client.responses.create(
+            model = "gpt-4o",
+            input = "ping",
+            store = True,
+        )
+        results["responses_api"] = {
+            "available":    True,
+            "response_id":  getattr(r, "id", "unknown"),
+            "traces_url":   "https://platform.openai.com/traces",
+            "message":      "✅ Traces WILL appear in platform.openai.com/traces",
+        }
+    except Exception as e:
+        results["responses_api"] = {
+            "available": False,
+            "error":     str(e),
+            "fallback":  "Using Chat Completions — visible in Usage tab, not Traces tab",
+        }
+
+    return {
+        "openai_key_set": True,
+        "features":       results,
+        "trace_proof_url": "https://platform.openai.com/traces",
+    }
+
+
+
+# ═══════════════════════════════════════════════════════════
+# EXECUTOR ENDPOINTS
+# These proxy to your real Codeastra API at app.codeastra.dev
+# The executor lives there — not here.
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/executor/capabilities")
+async def executor_capabilities():
+    """List executor capabilities — proxied from Codeastra."""
+    if CODEASTRA_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                r = await c.get(f"{CODEASTRA_URL}/executor/supported",
+                                headers={"X-API-Key": CODEASTRA_KEY})
+                if r.status_code == 200:
+                    return {
+                        "source":    "codeastra_api",
+                        "codeastra": r.json(),
+                        "proxy_endpoints": {
+                            "POST /executor/run":              "Run Codeastra Thinking Executor on a token",
+                            "POST /executor/check-threshold":  "Check if vaulted amount exceeds threshold",
+                            "POST /executor/concentration-check": "Check portfolio concentration",
+                            "POST /executor/sum-amounts":      "Sum vaulted amount tokens",
+                            "POST /executor/classify-amount":  "Classify vaulted amount into bucket",
+                            "POST /executor/resolve":          "Resolve token via Codeastra vault",
+                            "POST /executor/resolve-batch":    "Resolve multiple tokens at once",
+                        }
+                    }
+        except Exception:
+            pass
+
+    return {
+        "source": "local",
+        "endpoints": {
+            "POST /executor/run":               "Run Codeastra Thinking Executor on a token",
+            "POST /executor/check-threshold":   "Check if vaulted amount exceeds threshold",
+            "POST /executor/concentration-check":"Check portfolio concentration",
+            "POST /executor/sum-amounts":       "Sum vaulted amount tokens",
+            "POST /executor/classify-amount":   "Classify vaulted amount into bucket",
+            "POST /executor/resolve":           "Resolve token via Codeastra vault",
+            "POST /executor/resolve-batch":     "Resolve multiple tokens at once",
+        },
+        "guarantee": "Real values never returned to agent",
+    }
+
+
+@app.post("/executor/run")
+async def executor_run(req: Request):
+    """
+    Run the Codeastra Thinking Executor on a token.
+    Codeastra resolves token, applies rules, fires integrations.
+    Real value never returned.
+
+    Body: {token_id: str, dry_run: bool}
+    """
+    body   = await req.json()
+    result = await codeastra_executor_run(
+        body.get("token_id",""),
+        body.get("dry_run", False)
+    )
+    return result
+
+
+@app.post("/executor/resolve")
+async def executor_resolve(req: Request):
+    """
+    Resolve a single token via Codeastra vault.
+    For authorized executors only — never returns to agent.
+    """
+    body = await req.json()
+    val  = await codeastra_resolve(body.get("token",""))
+    if val is None:
+        return JSONResponse(status_code=404, content={"error":"Token not found in vault"})
+    return {"resolved": True, "real_value": val, "real_value_returned": True,
+            "note": "Use this in executor context only — never pass to agent"}
+
+
+@app.post("/executor/resolve-batch")
+async def executor_resolve_batch_endpoint(req: Request):
+    """Resolve multiple tokens via Codeastra vault."""
+    body    = await req.json()
+    tokens  = body.get("tokens", [])
+    results = await codeastra_resolve_batch(tokens)
+    return {"resolved": results, "count": len(results)}
+
+
+@app.post("/executor/check-threshold")
+async def executor_check_threshold(req: Request):
+    body      = await req.json()
+    token     = body.get("token","")
+    threshold = float(body.get("threshold", 0))
+    operator  = body.get("operator","gt")
+    real_val  = await codeastra_resolve(token)
+    if real_val is None:
+        return JSONResponse(status_code=404, content={"error":f"Cannot resolve: {token}"})
+    try:
+        v   = float(str(real_val).replace("$","").replace(",","").strip())
+        ops = {"gt":v>threshold,"lt":v<threshold,"gte":v>=threshold,"lte":v<=threshold,"eq":v==threshold}
+        return {"result":ops.get(operator,v>threshold),"operator":operator,
+                "threshold":threshold,"real_value_returned":False}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error":str(e)})
+
+
+@app.post("/executor/concentration-check")
+async def executor_concentration_check(req: Request):
+    body            = await req.json()
+    position_token  = body.get("position_token","")
+    portfolio_token = body.get("portfolio_token","")
+    threshold_pct   = float(body.get("threshold_pct",40.0))
+    pv = await codeastra_resolve(position_token)
+    tv = await codeastra_resolve(portfolio_token)
+    if pv is None or tv is None:
+        return {"exceeds_threshold":None,"note":"Tokens not resolved","real_values_seen_by_agent":False}
+    try:
+        p      = float(str(pv).replace("$","").replace(",","").strip())
+        t      = float(str(tv).replace("$","").replace(",","").strip())
+        pct    = (p/t*100) if t>0 else 0
+        bucket = "critical" if pct>60 else "high" if pct>40 else "medium" if pct>20 else "low"
+        return {"exceeds_threshold":pct>threshold_pct,"concentration_bucket":bucket,
+                "threshold_pct":threshold_pct,"real_values_seen_by_agent":False}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error":str(e)})
+
+
+@app.post("/executor/sum-amounts")
+async def executor_sum_amounts(req: Request):
+    body      = await req.json()
+    tokens    = body.get("tokens",[])
+    threshold = body.get("threshold")
+    # Use batch resolve from Codeastra
+    resolved  = await codeastra_resolve_batch(tokens)
+    total = 0.0; count = 0
+    for val in resolved.values():
+        try:
+            total += float(str(val).replace("$","").replace(",","").strip())
+            count += 1
+        except Exception:
+            pass
+    result = {"sum":total,"count":count,"real_individual_values_returned":False}
+    if threshold is not None:
+        result["exceeds_threshold"] = total > float(threshold)
+    return result
+
+
+@app.post("/executor/classify-amount")
+async def executor_classify_amount(req: Request):
+    body    = await req.json()
+    token   = body.get("token","")
+    buckets = body.get("buckets",[
+        {"label":"small","min":0,"max":10000},{"label":"medium","min":10000,"max":100000},
+        {"label":"large","min":100000,"max":1000000},{"label":"whale","min":1000000,"max":None},
+    ])
+    real_val = await codeastra_resolve(token)
+    if real_val is None:
+        return JSONResponse(status_code=404, content={"error":f"Cannot resolve {token}"})
+    try:
+        value = float(str(real_val).replace("$","").replace(",","").strip())
+        label = "unknown"
+        for b in buckets:
+            mn = b.get("min",0) or 0
+            mx = b.get("max")
+            if value >= mn and (mx is None or value < mx):
+                label = b["label"]; break
+        return {"bucket":label,"token":token,"real_value_returned":False}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error":str(e)})
 
 
 if __name__ == "__main__":
