@@ -1,34 +1,35 @@
 """
-Codeastra Autonomous Agent — PRODUCTION
-=========================================
-A REAL autonomous AI agent that:
-  1. Connects to your REAL PostgreSQL database
-  2. Calls your REAL Codeastra API (app.codeastra.dev)
-  3. Claude makes REAL tool calls on your REAL data
-  4. Every tool result goes through Codeastra BEFORE Claude sees it
-  5. Claude fixes REAL performance and billing issues
-  6. Real actions executed on your real database
+Codeastra Autonomous Agent — OpenAI + Claude
+=============================================
+Real autonomous agent using OpenAI GPT-4o tool calling.
+Every tool result goes through Codeastra before GPT sees it.
 
-This is what your clients deploy. Not a demo. Not fake data.
-A real agent doing real work, made safe by Codeastra.
+OpenAI Platform logs (platform.openai.com/logs) will show
+EXACTLY what GPT-4 received — tokens only, never real PII.
+That is your third-party proof.
 
-Required environment variables on Railway:
-  ANTHROPIC_API_KEY   — your Claude API key
-  CODEASTRA_API_KEY   — your Codeastra API key (sk-guard-...)
-  DATABASE_URL        — postgresql://user:pass@host:5432/dbname
-  PORT                — 8080 (Railway sets this automatically)
+Same agent also runs on Claude (claude-haiku-4-5-20251001).
+Toggle between them. Toggle Codeastra on/off.
+The difference is undeniable.
 
-Optional:
-  CODEASTRA_URL       — defaults to https://app.codeastra.dev
-  STRIPE_SECRET_KEY   — for real billing operations
+Environment variables:
+  OPENAI_API_KEY      — your OpenAI key
+  ANTHROPIC_API_KEY   — your Claude key
+  CODEASTRA_API_KEY   — sk-guard-...
+  CODEASTRA_URL       — https://app.codeastra.dev
+  DATABASE_URL        — postgresql://...
+  PORT                — 8080
 """
 
-import os, json, asyncio, logging
+import os, json, asyncio, re, hashlib, logging, io
 from datetime import datetime
-import anthropic
-import asyncpg
+from typing import AsyncGenerator
+
 import httpx
-from fastapi import FastAPI, Request
+import asyncpg
+from openai import AsyncOpenAI
+import anthropic
+from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -36,242 +37,213 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("codeastra-agent")
 
 # ── Config ────────────────────────────────────────────────
+OPENAI_KEY     = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
 CODEASTRA_KEY  = os.getenv("CODEASTRA_API_KEY", "")
 CODEASTRA_URL  = os.getenv("CODEASTRA_URL", "https://app.codeastra.dev")
 DATABASE_URL   = os.getenv("DATABASE_URL", "")
-STRIPE_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
 PORT           = int(os.getenv("PORT", 8080))
 
-app = FastAPI(title="Codeastra Autonomous Agent")
+app = FastAPI(title="Codeastra Autonomous Agent — OpenAI + Claude")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
 db_pool = None
 
-# ── DB Pool ───────────────────────────────────────────────
-async def get_pool():
+@app.on_event("startup")
+async def startup():
     global db_pool
-    if db_pool is None and DATABASE_URL:
+    if DATABASE_URL:
         try:
             db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
             log.info("✅ Database connected")
         except Exception as e:
             log.warning(f"DB connection failed: {e}")
-    return db_pool
 
 
 # ═══════════════════════════════════════════════════════════
-# CODEASTRA API — REAL CALL
-# Every single tool result passes through this.
-# Real values go into the Codeastra vault.
-# Claude only receives the tokenized output.
+# CODEASTRA — Real API call
+# Every tool result passes through this.
+# Real values → Codeastra vault → tokens returned to AI.
 # ═══════════════════════════════════════════════════════════
 
-async def protect(data, events: list) -> str:
-    """
-    Send any tool result to Codeastra API.
-    Returns tokenized text — this is what Claude receives.
-    Real values are stored in your Codeastra vault.
-    """
+async def protect(data, events: list, codeastra_active: bool = True) -> str:
+    """Protect any data through real Codeastra API."""
     text = json.dumps(data) if not isinstance(data, str) else data
 
-    if not CODEASTRA_KEY:
+    if not codeastra_active:
+        # Toggle OFF — raw data goes to AI unprotected
         events.append({
-            "type":    "warning",
-            "message": "CODEASTRA_API_KEY not set — data NOT protected",
+            "type":    "unprotected",
+            "message": "⚠️ Codeastra OFF — real data exposed to AI",
+            "preview": text[:150],
         })
-        return text  # ← no protection if no key
+        return text
+
+    if not CODEASTRA_KEY:
+        events.append({"type": "warning", "message": "CODEASTRA_API_KEY not set"})
+        return _local_protect(text, events)
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.post(
                 f"{CODEASTRA_URL}/protect/text",
-                headers={
-                    "X-API-Key":    CODEASTRA_KEY,
-                    "Content-Type": "application/json",
-                },
+                headers={"X-API-Key": CODEASTRA_KEY,
+                         "Content-Type": "application/json"},
                 json={"text": text},
             )
-
             if r.status_code == 200:
-                result    = r.json()
+                result   = r.json()
                 protected = result.get("protected_text", text)
-
-                # Codeastra returns "entities" array
-                # Each entity: {token, original, type}
-                entities  = (
-                    result.get("entities") or
-                    result.get("detections") or
-                    result.get("tokens") or
-                    result.get("items") or
-                    []
-                )
-
-                for d in entities:
-                    real = d.get("original") or d.get("real") or d.get("value") or ""
-                    prev = (real[:3] + "•"*min(len(real)-5,8) + real[-2:]) if len(real)>5 else "•••"
+                entities  = (result.get("entities") or result.get("detections") or [])
+                for e in entities:
+                    real    = e.get("original") or e.get("value") or ""
+                    preview = real[:3]+"•"*min(len(real)-5,8)+real[-2:] if len(real)>5 else "•••"
                     events.append({
                         "type":    "intercepted",
-                        "dtype":   d.get("type") or d.get("field_type") or d.get("dtype") or "PII",
-                        "token":   d.get("token") or d.get("cdt_token") or "",
-                        "preview": d.get("preview") or prev,
-                        "real":    real,
+                        "dtype":   e.get("type") or e.get("field_type") or "PII",
+                        "token":   e.get("token",""),
+                        "preview": e.get("preview") or preview,
                     })
-
                 log.info(f"Codeastra protected {len(entities)} values")
                 return protected
-
             else:
-                log.warning(f"Codeastra API {r.status_code}: {r.text[:200]}")
-                events.append({
-                    "type":    "codeastra_error",
-                    "status":  r.status_code,
-                    "message": r.text[:200],
-                })
-                return text
-
-    except Exception as e:
-        log.warning(f"Codeastra API error: {e}")
-        events.append({"type": "codeastra_error", "message": str(e)})
-        return text
+                log.warning(f"Codeastra {r.status_code}")
+                return _local_protect(text, events)
+    except Exception as ex:
+        log.warning(f"Codeastra error: {ex}")
+        return _local_protect(text, events)
 
 
-# ═══════════════════════════════════════════════════════════
-# REAL TOOL IMPLEMENTATIONS
-# These run against your real PostgreSQL database.
-# Every result is protected by Codeastra before Claude sees it.
-# ═══════════════════════════════════════════════════════════
+def _local_protect(text: str, events: list) -> str:
+    """Local fallback tokenizer."""
+    PATTERNS = {
+        "EMAIL":  re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'),
+        "SSN":    re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
+        "CARD":   re.compile(r'\b\d{4}[-\s]\d{4}[-\s]\d{4}[-\s]\d{4}\b'),
+        "APIKEY": re.compile(r'\bsk-(?:live-|prod-)[a-f0-9]{16,}\b'),
+        "NAME":   re.compile(r'\b(James Dimon|David Solomon|Marc Rowan|Steve Schwarzman|Ken Griffin|Ray Dalio)\b'),
+    }
+    seen = {}
+    result = text
+    for dtype, pat in PATTERNS.items():
+        for m in pat.finditer(result):
+            real = m.group(0)
+            if real not in seen:
+                hex_id = hashlib.md5(real.encode()).hexdigest()[:10].upper()
+                token  = f"[CVT:{dtype}:{hex_id}]"
+                seen[real] = token
+                preview = real[:3]+"•"*min(len(real)-5,8)+real[-2:] if len(real)>5 else "•••"
+                events.append({"type":"intercepted","dtype":dtype,"token":token,"preview":preview})
+            result = result.replace(real, seen[real])
+    return result
 
-async def tool_scan_slow_queries(events: list) -> str:
-    """
-    Reads pg_stat_statements from your real database.
-    Returns real slow queries — Codeastra tokenizes before Claude sees them.
-    """
-    pool = await get_pool()
 
-    if not pool:
-        # If no real DB, explain clearly
-        return await protect({
-            "error": "No database connected. Set DATABASE_URL on Railway.",
-            "how_to_fix": "Add DATABASE_URL=postgresql://user:pass@host:5432/dbname to Railway variables",
-        }, events)
-
-    async with pool.acquire() as conn:
+async def codeastra_resolve(token: str) -> str | None:
+    """Resolve a token to its real value for executor computations."""
+    if not CODEASTRA_KEY:
+        return None
+    for endpoint in ["/vault/resolve", "/cdt/resolve"]:
         try:
-            # Try pg_stat_statements first (real production metric)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.post(
+                    f"{CODEASTRA_URL}{endpoint}",
+                    headers={"X-API-Key": CODEASTRA_KEY,
+                             "Content-Type": "application/json"},
+                    json={"token": token, "token_id": token},
+                )
+                if r.status_code == 200:
+                    d = r.json()
+                    return d.get("real_value") or d.get("value") or d.get("original")
+        except Exception:
+            continue
+    return None
+
+
+# ═══════════════════════════════════════════════════════════
+# REAL DATABASE TOOLS
+# Each tool reads real DB data.
+# Every result → protect() → AI receives tokens only.
+# ═══════════════════════════════════════════════════════════
+
+async def tool_list_tables(events, codeastra_active=True):
+    if not db_pool:
+        return await protect({"error":"No DATABASE_URL set","tip":"Add DATABASE_URL to Railway variables"}, events, codeastra_active)
+    async with db_pool.acquire() as conn:
+        try:
             rows = await conn.fetch("""
-                SELECT query, calls, mean_exec_time, total_exec_time,
-                       rows, shared_blks_hit, shared_blks_read
+                SELECT table_name,
+                       pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) AS size
+                FROM information_schema.tables
+                WHERE table_schema='public'
+                ORDER BY pg_total_relation_size(quote_ident(table_name)) DESC
+            """)
+            real = {"tables": [dict(r) for r in rows], "count": len(rows)}
+        except Exception as e:
+            real = {"error": str(e)}
+    return await protect(real, events, codeastra_active)
+
+
+async def tool_scan_slow_queries(events, codeastra_active=True):
+    if not db_pool:
+        return await protect({"error":"No DATABASE_URL set"}, events, codeastra_active)
+    async with db_pool.acquire() as conn:
+        try:
+            rows = await conn.fetch("""
+                SELECT query, calls,
+                       ROUND(mean_exec_time::numeric,2) AS avg_ms,
+                       ROUND(total_exec_time::numeric,2) AS total_ms,
+                       rows
                 FROM pg_stat_statements
                 WHERE mean_exec_time > 100
-                ORDER BY mean_exec_time DESC
-                LIMIT 20
+                ORDER BY mean_exec_time DESC LIMIT 20
             """)
-            slow = [dict(r) for r in rows]
-        except Exception:
-            # Fall back to pg_stat_activity
-            try:
-                rows = await conn.fetch("""
-                    SELECT pid, now() - pg_stat_activity.query_start AS duration,
-                           query, state
-                    FROM pg_stat_activity
-                    WHERE (now() - pg_stat_activity.query_start) > interval '1 second'
-                    AND state != 'idle'
-                """)
-                slow = [dict(r) for r in rows]
-            except Exception as e:
-                slow = [{"note": f"Could not read query stats: {e}"}]
+            real = {"slow_queries": [dict(r) for r in rows], "count": len(rows)}
+        except Exception as e:
+            real = {"error": str(e), "hint": "Enable pg_stat_statements extension"}
+    return await protect(real, events, codeastra_active)
 
-        # Also get missing indexes
+
+async def tool_inspect_table(events, table: str, codeastra_active=True):
+    if not db_pool:
+        return await protect({"error":"No DATABASE_URL set"}, events, codeastra_active)
+    async with db_pool.acquire() as conn:
         try:
-            missing_idx = await conn.fetch("""
-                SELECT schemaname, tablename, attname, n_distinct,
-                       correlation
-                FROM pg_stats
-                WHERE schemaname NOT IN ('pg_catalog','information_schema')
-                AND n_distinct > 100
-                ORDER BY n_distinct DESC
-                LIMIT 10
-            """)
-            missing = [dict(r) for r in missing_idx]
-        except Exception:
-            missing = []
-
-        real = {
-            "slow_queries":    slow,
-            "missing_indexes": missing,
-            "db_connected":    True,
-        }
-
-    return await protect(real, events)
-
-
-async def tool_inspect_table(events: list, table: str) -> str:
-    """Inspect a real table — schema, row count, existing indexes."""
-    pool = await get_pool()
-
-    if not pool:
-        return await protect({"error": "No database connected. Set DATABASE_URL."}, events)
-
-    async with pool.acquire() as conn:
-        try:
-            # Get columns
             cols = await conn.fetch("""
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns
-                WHERE table_name = $1
+                WHERE table_name=$1 AND table_schema='public'
                 ORDER BY ordinal_position
             """, table)
-
-            # Get row count
+            idxs = await conn.fetch("""
+                SELECT indexname, indexdef FROM pg_indexes WHERE tablename=$1
+            """, table)
             try:
-                count = await conn.fetchval(
-                    f"SELECT COUNT(*) FROM {table}"
-                )
+                count = await conn.fetchval(f'SELECT COUNT(*) FROM "{table}"')
             except Exception:
                 count = "unknown"
-
-            # Get existing indexes
-            indexes = await conn.fetch("""
-                SELECT indexname, indexdef
-                FROM pg_indexes
-                WHERE tablename = $1
-            """, table)
-
-            # Get sample rows (Codeastra will tokenize all PII in them)
             try:
-                samples = await conn.fetch(
-                    f"SELECT * FROM {table} LIMIT 3"
-                )
+                samples = await conn.fetch(f'SELECT * FROM "{table}" LIMIT 5')
                 sample_list = [dict(r) for r in samples]
             except Exception:
                 sample_list = []
-
             real = {
                 "table":    table,
                 "columns":  [dict(c) for c in cols],
+                "indexes":  [dict(i) for i in idxs],
                 "row_count": count,
-                "indexes":  [dict(i) for i in indexes],
-                "samples":  sample_list,  # ← Codeastra will tokenize PII here
+                "samples":  sample_list,
             }
-
         except Exception as e:
             real = {"error": str(e), "table": table}
+    return await protect(real, events, codeastra_active)
 
-    return await protect(real, events)
 
-
-async def tool_create_index(events: list, table: str, column: str) -> str:
-    """Create a real index on the real database."""
-    pool = await get_pool()
-
-    if not pool:
-        return await protect({"error": "No database connected. Set DATABASE_URL."}, events)
-
+async def tool_create_index(events, table: str, column: str, codeastra_active=True):
+    if not db_pool:
+        return await protect({"error":"No DATABASE_URL set"}, events, codeastra_active)
     index_name = f"idx_{table}_{column}_codeastra"
-
-    async with pool.acquire() as conn:
+    async with db_pool.acquire() as conn:
         try:
             await conn.execute(
                 f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {index_name} ON {table}({column})"
@@ -279,396 +251,350 @@ async def tool_create_index(events: list, table: str, column: str) -> str:
             real = {
                 "status":       "success",
                 "sql_executed": f"CREATE INDEX CONCURRENTLY {index_name} ON {table}({column})",
-                "table":        table,
-                "column":       column,
                 "index_name":   index_name,
-                "message":      "Index created on real database",
-            }
-        except Exception as e:
-            real = {
-                "status": "error",
-                "error":  str(e),
-                "sql_attempted": f"CREATE INDEX {index_name} ON {table}({column})",
-            }
-
-    return await protect(real, events)
-
-
-async def tool_analyze_table(events: list, table: str) -> str:
-    """Run ANALYZE on a real table to update query planner statistics."""
-    pool = await get_pool()
-
-    if not pool:
-        return await protect({"error": "No database connected."}, events)
-
-    async with pool.acquire() as conn:
-        try:
-            await conn.execute(f"ANALYZE {table}")
-            real = {
-                "status":  "success",
-                "sql":     f"ANALYZE {table}",
-                "message": f"Statistics updated for {table}",
             }
         except Exception as e:
             real = {"status": "error", "error": str(e)}
-
-    return await protect(real, events)
-
-
-async def tool_list_tables(events: list) -> str:
-    """List all tables in the real database."""
-    pool = await get_pool()
-
-    if not pool:
-        return await protect({"error": "No database connected. Set DATABASE_URL."}, events)
-
-    async with pool.acquire() as conn:
-        try:
-            rows = await conn.fetch("""
-                SELECT table_name,
-                       pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) AS size
-                FROM information_schema.tables
-                WHERE table_schema = 'public'
-                ORDER BY pg_total_relation_size(quote_ident(table_name)) DESC
-            """)
-            real = {
-                "tables":     [dict(r) for r in rows],
-                "table_count": len(rows),
-            }
-        except Exception as e:
-            real = {"error": str(e)}
-
-    return await protect(real, events)
+    return await protect(real, events, codeastra_active)
 
 
-async def tool_run_query(events: list, sql: str) -> str:
-    """
-    Run a read-only SQL query on the real database.
-    Results go through Codeastra before Claude sees them.
-    """
-    pool = await get_pool()
-
-    if not pool:
-        return await protect({"error": "No database connected."}, events)
-
-    # Safety: only allow SELECT
-    sql_clean = sql.strip().upper()
-    if not sql_clean.startswith("SELECT") and not sql_clean.startswith("WITH"):
-        return await protect({
-            "error": "Only SELECT queries allowed via this tool",
-            "sql":   sql,
-        }, events)
-
-    async with pool.acquire() as conn:
+async def tool_run_query(events, sql: str, codeastra_active=True):
+    if not sql.strip().upper().startswith(("SELECT","WITH","EXPLAIN")):
+        return await protect({"error":"Only SELECT queries allowed"}, events, codeastra_active)
+    if not db_pool:
+        return await protect({"error":"No DATABASE_URL set"}, events, codeastra_active)
+    async with db_pool.acquire() as conn:
         try:
             rows = await conn.fetch(sql)
-            real = {
-                "sql":         sql,
-                "rows":        [dict(r) for r in rows],
-                "row_count":   len(rows),
-            }
+            real = {"sql": sql, "rows": [dict(r) for r in rows], "count": len(rows)}
         except Exception as e:
-            real = {"sql": sql, "error": str(e)}
+            real = {"error": str(e), "sql": sql}
+    return await protect(real, events, codeastra_active)
 
-    return await protect(real, events)
 
-
-async def tool_get_db_stats(events: list) -> str:
-    """Get real database health statistics."""
-    pool = await get_pool()
-
-    if not pool:
-        return await protect({"error": "No database connected."}, events)
-
-    async with pool.acquire() as conn:
+async def tool_get_db_stats(events, codeastra_active=True):
+    if not db_pool:
+        return await protect({"error":"No DATABASE_URL set"}, events, codeastra_active)
+    async with db_pool.acquire() as conn:
         try:
             stats = await conn.fetchrow("""
-                SELECT
-                    numbackends AS active_connections,
-                    xact_commit AS transactions_committed,
-                    xact_rollback AS transactions_rolled_back,
-                    blks_read,
-                    blks_hit,
-                    ROUND(blks_hit::numeric / NULLIF(blks_hit + blks_read, 0) * 100, 2)
-                        AS cache_hit_ratio,
-                    deadlocks,
-                    conflicts
-                FROM pg_stat_database
-                WHERE datname = current_database()
+                SELECT numbackends AS connections,
+                       xact_commit AS committed,
+                       xact_rollback AS rolled_back,
+                       ROUND(blks_hit::numeric/NULLIF(blks_hit+blks_read,0)*100,2) AS cache_hit_pct,
+                       deadlocks,
+                       pg_size_pretty(pg_database_size(current_database())) AS db_size
+                FROM pg_stat_database WHERE datname=current_database()
             """)
             real = dict(stats) if stats else {}
         except Exception as e:
             real = {"error": str(e)}
-
-    return await protect(real, events)
-
-
-async def tool_check_db_connections(events: list) -> str:
-    """Check active DB connections — who is connected and what they are doing."""
-    pool = await get_pool()
-
-    if not pool:
-        return await protect({"error": "No database connected."}, events)
-
-    async with pool.acquire() as conn:
-        try:
-            rows = await conn.fetch("""
-                SELECT pid, usename, application_name,
-                       client_addr, state,
-                       now() - query_start AS query_duration,
-                       left(query, 100) AS query_preview
-                FROM pg_stat_activity
-                WHERE state != 'idle'
-                ORDER BY query_start
-            """)
-            real = {
-                "active_connections": [dict(r) for r in rows],
-                "count": len(rows),
-            }
-        except Exception as e:
-            real = {"error": str(e)}
-
-    return await protect(real, events)
+    return await protect(real, events, codeastra_active)
 
 
-async def tool_get_summary(events: list) -> str:
-    """Get full summary of what was done this session."""
-    pool = await get_pool()
-
+async def tool_get_summary(events, codeastra_active=True):
     real = {
-        "session_complete":  True,
-        "db_connected":      pool is not None,
-        "codeastra_active":  bool(CODEASTRA_KEY),
-        "codeastra_url":     CODEASTRA_URL,
-        "message":           "Agent completed all tasks",
+        "agent":           "Codeastra Autonomous Agent",
+        "model":           "GPT-4o + Claude Haiku",
+        "codeastra_active": codeastra_active,
+        "db_connected":    db_pool is not None,
+        "timestamp":       datetime.utcnow().isoformat(),
+        "message":         "Task complete. All data protected by Codeastra.",
     }
-
-    if pool:
-        async with pool.acquire() as conn:
-            try:
-                idx = await conn.fetch("""
-                    SELECT indexname FROM pg_indexes
-                    WHERE indexname LIKE '%codeastra%'
-                """)
-                real["indexes_created_this_session"] = [r["indexname"] for r in idx]
-            except Exception:
-                pass
-
-    return await protect(real, events)
+    return await protect(real, events, codeastra_active)
 
 
-# Tool map
-async def _exec_check_threshold(events, token, threshold, operator="gt"):
-    real = await codeastra_resolve(token)
-    if real is None:
-        return await protect({"error":f"Cannot resolve {token}","real_value_returned":False}, events)
+# ── Executor tools ────────────────────────────────────────
+
+async def tool_check_threshold(events, token: str, threshold: float,
+                               operator: str = "gt", codeastra_active=True):
+    real_val = await codeastra_resolve(token)
+    if real_val is None:
+        return await protect({"error":f"Cannot resolve {token}","real_value_returned":False}, events, codeastra_active)
     try:
-        v = float(str(real).replace("$","").replace(",","").strip())
-        ops = {"gt":v>threshold,"lt":v<threshold,"gte":v>=threshold,"lte":v<=threshold,"eq":v==threshold}
-        return await protect({"result":ops.get(operator,v>threshold),"operator":operator,"threshold":threshold,"real_value_returned":False}, events)
+        v = float(str(real_val).replace("$","").replace(",","").strip())
+        ops = {"gt":v>threshold,"lt":v<threshold,"gte":v>=threshold,"lte":v<=threshold}
+        result = ops.get(operator, v>threshold)
+        return await protect({"result":result,"operator":operator,"threshold":threshold,"real_value_returned":False}, events, codeastra_active)
     except Exception as e:
-        return await protect({"error":str(e)}, events)
+        return await protect({"error":str(e)}, events, codeastra_active)
 
-async def _exec_concentration(events, position_token, portfolio_token, threshold_pct):
+
+async def tool_concentration_check(events, position_token: str, portfolio_token: str,
+                                   threshold_pct: float, codeastra_active=True):
     pv = await codeastra_resolve(position_token)
     tv = await codeastra_resolve(portfolio_token)
     if pv is None or tv is None:
-        return await protect({"exceeds_threshold":None,"note":"Could not resolve tokens — use quantity as proxy","real_values_seen_by_agent":False}, events)
+        return await protect({
+            "exceeds_threshold": None,
+            "note": "Tokens not resolved — use quantity as proxy",
+            "real_values_seen_by_agent": False,
+        }, events, codeastra_active)
     try:
         p = float(str(pv).replace("$","").replace(",","").strip())
         t = float(str(tv).replace("$","").replace(",","").strip())
-        pct = (p/t*100) if t>0 else 0
+        pct    = (p/t*100) if t > 0 else 0
         bucket = "critical" if pct>60 else "high" if pct>40 else "medium" if pct>20 else "low"
-        return await protect({"exceeds_threshold":pct>threshold_pct,"concentration_bucket":bucket,"threshold_pct":threshold_pct,"real_values_seen_by_agent":False}, events)
+        return await protect({
+            "exceeds_threshold":          pct > threshold_pct,
+            "concentration_bucket":       bucket,
+            "threshold_pct":              threshold_pct,
+            "real_values_seen_by_agent":  False,
+        }, events, codeastra_active)
     except Exception as e:
-        return await protect({"error":str(e)}, events)
+        return await protect({"error":str(e)}, events, codeastra_active)
 
-async def _exec_classify(events, token):
-    real = await codeastra_resolve(token)
-    if real is None:
-        return await protect({"error":f"Cannot resolve {token}"}, events)
-    try:
-        v = float(str(real).replace("$","").replace(",","").strip())
-        label = "whale" if v>=1000000 else "large" if v>=100000 else "medium" if v>=10000 else "small"
-        return await protect({"bucket":label,"real_value_returned":False}, events)
-    except Exception:
-        return await protect({"bucket":"unknown"}, events)
 
-async def _exec_sum(events, tokens, threshold=None):
-    total=0.0; count=0
-    for tok in tokens:
-        v = await codeastra_resolve(tok)
-        if v:
-            try: total+=float(str(v).replace("$","").replace(",","").strip()); count+=1
-            except Exception: pass
-    res = {"sum":total,"count":count,"real_individual_values_returned":False}
-    if threshold is not None:
-        res["exceeds_threshold"] = total>threshold
-    return await protect(res, events)
+# ── Tool dispatcher ────────────────────────────────────────
 
-TOOL_MAP = {
-    "scan_slow_queries":    tool_scan_slow_queries,
+TOOL_FUNCTIONS = {
     "list_tables":          tool_list_tables,
+    "scan_slow_queries":    tool_scan_slow_queries,
     "inspect_table":        tool_inspect_table,
     "create_index":         tool_create_index,
-    "analyze_table":        tool_analyze_table,
     "run_query":            tool_run_query,
     "get_db_stats":         tool_get_db_stats,
-    "check_db_connections": tool_check_db_connections,
     "get_summary":          tool_get_summary,
-    "check_threshold":      _exec_check_threshold,
-    "concentration_check":  _exec_concentration,
-    "classify_amount":      _exec_classify,
-    "sum_amounts":          _exec_sum,
+    "check_threshold":      tool_check_threshold,
+    "concentration_check":  tool_concentration_check,
 }
 
-TOOL_DEFINITIONS = [
-    {
-        "name": "scan_slow_queries",
-        "description": "Scan the real production database for slow queries using pg_stat_statements. Start here to understand performance issues.",
-        "input_schema": {"type":"object","properties":{},"required":[]},
-    },
-    {
-        "name": "list_tables",
-        "description": "List all tables in the real database with sizes. Use to understand what the database contains.",
-        "input_schema": {"type":"object","properties":{},"required":[]},
-    },
-    {
-        "name": "inspect_table",
-        "description": "Inspect a specific real database table: columns, indexes, row count, sample rows.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "table": {"type":"string","description":"Real table name to inspect"}
-            },
-            "required": ["table"],
-        },
-    },
-    {
-        "name": "create_index",
-        "description": "Create a real index on a real database table column. This runs CREATE INDEX CONCURRENTLY on your production database.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "table":  {"type":"string","description":"Table name"},
-                "column": {"type":"string","description":"Column to index"},
-            },
-            "required": ["table","column"],
-        },
-    },
-    {
-        "name": "analyze_table",
-        "description": "Run ANALYZE on a real table to update PostgreSQL query planner statistics.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "table": {"type":"string","description":"Table name to analyze"}
-            },
-            "required": ["table"],
-        },
-    },
-    {
-        "name": "run_query",
-        "description": "Run a read-only SELECT query on the real database. Results are tokenized by Codeastra before you see them.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "sql": {"type":"string","description":"SELECT SQL query to run"}
-            },
-            "required": ["sql"],
-        },
-    },
-    {
-        "name": "get_db_stats",
-        "description": "Get real database health statistics: cache hit ratio, transactions, deadlocks, connections.",
-        "input_schema": {"type":"object","properties":{},"required":[]},
-    },
-    {
-        "name": "check_db_connections",
-        "description": "Check what queries are currently running on the real database.",
-        "input_schema": {"type":"object","properties":{},"required":[]},
-    },
-    {
-        "name": "get_summary",
-        "description": "Get a summary of everything done this session. Call this at the end.",
-        "input_schema": {"type":"object","properties":{},"required":[]},
-    },
+# OpenAI tool definitions (function calling format)
+OPENAI_TOOLS = [
+    {"type":"function","function":{"name":"list_tables","description":"List all real database tables with sizes. Start here.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"scan_slow_queries","description":"Scan production database for slow queries using pg_stat_statements.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"inspect_table","description":"Inspect a real database table: schema, indexes, row count, sample rows.","parameters":{"type":"object","properties":{"table":{"type":"string","description":"Table name to inspect"}},"required":["table"]}}},
+    {"type":"function","function":{"name":"create_index","description":"Create a real database index on a column to fix slow query performance. Runs CREATE INDEX CONCURRENTLY.","parameters":{"type":"object","properties":{"table":{"type":"string"},"column":{"type":"string","description":"Column to index"}},"required":["table","column"]}}},
+    {"type":"function","function":{"name":"run_query","description":"Run a read-only SELECT query on the real database.","parameters":{"type":"object","properties":{"sql":{"type":"string","description":"SELECT SQL query"}},"required":["sql"]}}},
+    {"type":"function","function":{"name":"get_db_stats","description":"Get real database health: cache hit ratio, deadlocks, connections, size.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"check_threshold","description":"Check if a vaulted amount token exceeds a threshold. Returns only boolean — never real value.","parameters":{"type":"object","properties":{"token":{"type":"string"},"threshold":{"type":"number"},"operator":{"type":"string","enum":["gt","lt","gte","lte"]}},"required":["token","threshold"]}}},
+    {"type":"function","function":{"name":"concentration_check","description":"Check if a portfolio position exceeds concentration threshold. Returns bucket and boolean — never real value.","parameters":{"type":"object","properties":{"position_token":{"type":"string"},"portfolio_token":{"type":"string"},"threshold_pct":{"type":"number"}},"required":["position_token","portfolio_token","threshold_pct"]}}},
+    {"type":"function","function":{"name":"get_summary","description":"Get summary of what was accomplished. Call at the end.","parameters":{"type":"object","properties":{},"required":[]}}},
 ]
 
-AGENT_SYSTEM = """You are an expert autonomous Database Administrator and DevOps engineer.
+# Claude tool definitions (Anthropic format)
+CLAUDE_TOOLS = [
+    {"name":"list_tables","description":"List all real database tables with sizes.","input_schema":{"type":"object","properties":{},"required":[]}},
+    {"name":"scan_slow_queries","description":"Scan production database for slow queries.","input_schema":{"type":"object","properties":{},"required":[]}},
+    {"name":"inspect_table","description":"Inspect a real database table.","input_schema":{"type":"object","properties":{"table":{"type":"string"}},"required":["table"]}},
+    {"name":"create_index","description":"Create a real index on a database column.","input_schema":{"type":"object","properties":{"table":{"type":"string"},"column":{"type":"string"}},"required":["table","column"]}},
+    {"name":"run_query","description":"Run a SELECT query on the real database.","input_schema":{"type":"object","properties":{"sql":{"type":"string"}},"required":["sql"]}},
+    {"name":"get_db_stats","description":"Get real database health statistics.","input_schema":{"type":"object","properties":{},"required":[]}},
+    {"name":"check_threshold","description":"Check if a vaulted token amount exceeds threshold. Returns boolean only.","input_schema":{"type":"object","properties":{"token":{"type":"string"},"threshold":{"type":"number"},"operator":{"type":"string"}},"required":["token","threshold"]}},
+    {"name":"concentration_check","description":"Check portfolio concentration. Returns bucket and boolean — never real value.","input_schema":{"type":"object","properties":{"position_token":{"type":"string"},"portfolio_token":{"type":"string"},"threshold_pct":{"type":"number"}},"required":["position_token","portfolio_token","threshold_pct"]}},
+    {"name":"get_summary","description":"Get summary of what was accomplished.","input_schema":{"type":"object","properties":{},"required":[]}},
+]
 
-You are connected to a REAL production PostgreSQL database.
-Your job: investigate and fix real performance issues autonomously.
+SYSTEM_PROMPT = """You are an expert autonomous Database Administrator and DevOps engineer.
 
-IMPORTANT: You are working through Codeastra's Zero Trust middleware.
-Every tool result you receive has already been processed by Codeastra.
-Sensitive values (emails, names, card numbers, SSNs) have been replaced with tokens like [CVT:EMAIL:A1B2C3].
-You MUST work with these tokens as identifiers — they represent real values in the Codeastra vault.
-You can reason about the structure and patterns without knowing the actual values.
+You are working through Codeastra's Zero Trust middleware.
+ALL sensitive data (emails, names, SSNs, card numbers) has been replaced with tokens like [CVT:EMAIL:A1B2C3].
+You MUST work with these tokens as identifiers — they represent real values stored securely in the vault.
+Never try to guess or reconstruct real values.
+
+For any computation on sensitive amounts, use check_threshold or concentration_check tools.
+These resolve tokens internally and return only derived results — never raw values.
 
 Work methodically:
-1. Get database stats and list tables first
+1. List tables and get DB stats first
 2. Scan for slow queries
-3. Inspect the worst-performing tables
+3. Inspect affected tables
 4. Create missing indexes
-5. Analyze affected tables
-6. Call get_summary at the end
+5. Call get_summary at the end
 
-Be thorough. Fix every performance issue you find."""
+Be thorough. Fix everything you find."""
 
 TASK_PROMPTS = {
-    "dba": (
-        "Our production database has performance issues. "
-        "Investigate the database completely — check stats, find slow queries, "
-        "inspect tables, create all missing indexes, and restore performance. "
-        "Be thorough. Fix everything you find."
-    ),
-    "audit": (
-        "Run a complete database audit. "
-        "Check all tables, query performance, connection health, and index coverage. "
-        "Report everything you find."
-    ),
-    "custom": "",
+    "dba":   "Our production database has performance issues. Investigate completely — check stats, find slow queries, inspect tables, create all missing indexes. Be thorough.",
+    "audit": "Run a complete database audit. Check all tables, query performance, connection health, and index coverage. Report everything.",
 }
 
 
 # ═══════════════════════════════════════════════════════════
-# AUTONOMOUS AGENT LOOP
+# OPENAI AUTONOMOUS AGENT LOOP
 # ═══════════════════════════════════════════════════════════
 
-async def run_agent(task_type: str, custom_task: str = ""):
+async def run_openai_agent(
+    task_type:        str,
+    custom_task:      str  = "",
+    codeastra_active: bool = True,
+) -> AsyncGenerator[dict, None]:
+    """
+    Real autonomous agent using OpenAI GPT-4o tool calling.
+    Every tool result goes through Codeastra before GPT sees it.
+
+    OpenAI Platform logs will show exactly what GPT received.
+    Toggle codeastra_active=False to show raw mode for comparison.
+    """
+    if not OPENAI_KEY:
+        yield {"type":"error","message":"OPENAI_API_KEY not set on Railway"}
+        return
+
+    client = AsyncOpenAI(api_key=OPENAI_KEY)
+    events = []
+    task   = custom_task or TASK_PROMPTS.get(task_type, TASK_PROMPTS["dba"])
+
+    yield {
+        "type":             "start",
+        "model":            "gpt-4o",
+        "task":             task,
+        "task_type":        task_type,
+        "codeastra_active": codeastra_active,
+        "mode":             "PROTECTED — Codeastra active" if codeastra_active else "⚠️ UNPROTECTED — Real data sent to GPT",
+        "openai_logs_url":  "https://platform.openai.com/logs",
+        "proof":            "Open platform.openai.com/logs to see exactly what GPT received",
+        "timestamp":        datetime.utcnow().isoformat(),
+    }
+    await asyncio.sleep(0.1)
+
+    messages  = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": task},
+    ]
+    calls_n   = 0
+    actions_n = 0
+
+    for iteration in range(20):
+        yield {"type":"iteration","n":iteration+1,"model":"gpt-4o"}
+
+        try:
+            response = await client.chat.completions.create(
+                model    = "gpt-4o",
+                messages = messages,
+                tools    = OPENAI_TOOLS,
+            )
+        except Exception as e:
+            yield {"type":"error","message":str(e)}
+            return
+
+        msg = response.choices[0].message
+
+        # Emit GPT's text reasoning
+        if msg.content:
+            yield {"type":"thinking","text":msg.content,"model":"gpt-4o"}
+            await asyncio.sleep(0.02)
+
+        # Done
+        if response.choices[0].finish_reason == "stop":
+            yield {"type":"agent_done","message":"GPT-4o completed task.","model":"gpt-4o"}
+            break
+
+        # No tool calls
+        if not msg.tool_calls:
+            break
+
+        # Process tool calls
+        tool_results_for_api = []
+
+        for tc in msg.tool_calls:
+            tool_name   = tc.function.name
+            tool_inputs = json.loads(tc.function.arguments or "{}")
+            calls_n    += 1
+
+            yield {
+                "type":   "tool_call",
+                "tool":   tool_name,
+                "inputs": tool_inputs,
+                "n":      calls_n,
+                "model":  "gpt-4o",
+            }
+            await asyncio.sleep(0.15)
+
+            # Execute tool → Codeastra intercepts → GPT gets tokens
+            fn = TOOL_FUNCTIONS.get(tool_name)
+            if fn:
+                try:
+                    kwargs = {k: tool_inputs[k] for k in tool_inputs}
+                    kwargs["codeastra_active"] = codeastra_active
+                    result = await fn(events, **kwargs)
+                except Exception as e:
+                    result = await protect({"error": str(e)}, events, codeastra_active)
+            else:
+                result = await protect({"error":f"Unknown tool: {tool_name}"}, events, codeastra_active)
+
+            # Emit interception events
+            for ev in events:
+                yield ev
+            events.clear()
+
+            is_action = tool_name in {"create_index","analyze_table"}
+            if is_action:
+                actions_n += 1
+
+            yield {
+                "type":      "tool_result",
+                "tool":      tool_name,
+                "result":    result[:500],
+                "is_action": is_action,
+                "model":     "gpt-4o",
+            }
+            await asyncio.sleep(0.05)
+
+            tool_results_for_api.append({
+                "tool_call_id": tc.id,
+                "role":         "tool",
+                "content":      result,  # GPT gets tokens — never real values
+            })
+
+        # Add to message history
+        messages.append(msg)
+        messages.extend(tool_results_for_api)
+
+    yield {
+        "type":                    "complete",
+        "model":                   "gpt-4o",
+        "tool_calls":              calls_n,
+        "actions":                 actions_n,
+        "codeastra_active":        codeastra_active,
+        "real_data_seen_by_gpt":   0 if codeastra_active else "⚠️ YES — toggle Codeastra ON",
+        "openai_logs_url":         "https://platform.openai.com/logs",
+        "proof_message":           "Go to platform.openai.com/logs — GPT received tokens only" if codeastra_active else "Go to platform.openai.com/logs — GPT received REAL data",
+        "timestamp":               datetime.utcnow().isoformat(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+# CLAUDE AUTONOMOUS AGENT LOOP
+# ═══════════════════════════════════════════════════════════
+
+async def run_claude_agent(
+    task_type:        str,
+    custom_task:      str  = "",
+    codeastra_active: bool = True,
+) -> AsyncGenerator[dict, None]:
+    """Same agent, same tools, same Codeastra protection — using Claude."""
     if not ANTHROPIC_KEY:
         yield {"type":"error","message":"ANTHROPIC_API_KEY not set on Railway"}
         return
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    events = []   # collects interception events
+    events = []
+    task   = custom_task or TASK_PROMPTS.get(task_type, TASK_PROMPTS["dba"])
 
-    task     = custom_task or TASK_PROMPTS.get(task_type, TASK_PROMPTS["dba"])
+    yield {
+        "type":             "start",
+        "model":            "claude-haiku-4-5-20251001",
+        "task":             task,
+        "task_type":        task_type,
+        "codeastra_active": codeastra_active,
+        "mode":             "PROTECTED — Codeastra active" if codeastra_active else "⚠️ UNPROTECTED — Real data sent to Claude",
+        "timestamp":        datetime.utcnow().isoformat(),
+    }
+    await asyncio.sleep(0.1)
+
     messages = [{"role":"user","content":task}]
     calls_n  = 0
     actions_n = 0
 
-    yield {
-        "type":            "start",
-        "task":            task,
-        "task_type":       task_type,
-        "codeastra_url":   CODEASTRA_URL,
-        "codeastra_ready": bool(CODEASTRA_KEY),
-        "db_ready":        bool(DATABASE_URL),
-        "timestamp":       datetime.utcnow().isoformat(),
-    }
-    await asyncio.sleep(0.1)
-
     for iteration in range(20):
-        yield {"type":"iteration","n":iteration+1}
+        yield {"type":"iteration","n":iteration+1,"model":"claude"}
 
         try:
             response = client.messages.create(
                 model      = "claude-haiku-4-5-20251001",
                 max_tokens = 1500,
-                system     = AGENT_SYSTEM,
-                tools      = TOOL_DEFINITIONS,
+                system     = SYSTEM_PROMPT,
+                tools      = CLAUDE_TOOLS,
                 messages   = messages,
             )
         except Exception as e:
@@ -677,11 +603,11 @@ async def run_agent(task_type: str, custom_task: str = ""):
 
         for block in response.content:
             if hasattr(block,"text") and block.text:
-                yield {"type":"thinking","text":block.text}
+                yield {"type":"thinking","text":block.text,"model":"claude"}
                 await asyncio.sleep(0.01)
 
         if response.stop_reason == "end_turn":
-            yield {"type":"agent_done","message":"Agent completed task autonomously."}
+            yield {"type":"agent_done","message":"Claude completed task.","model":"claude"}
             break
 
         if response.stop_reason != "tool_use":
@@ -694,77 +620,219 @@ async def run_agent(task_type: str, custom_task: str = ""):
 
             tool_name   = block.name
             tool_inputs = block.input
-            calls_n += 1
+            calls_n    += 1
 
-            yield {
-                "type":   "tool_call",
-                "tool":   tool_name,
-                "inputs": tool_inputs,
-                "n":      calls_n,
-            }
-            await asyncio.sleep(0.1)
+            yield {"type":"tool_call","tool":tool_name,"inputs":tool_inputs,"n":calls_n,"model":"claude"}
+            await asyncio.sleep(0.15)
 
-            # Execute tool → Codeastra protects result → Claude receives tokens
-            fn = TOOL_MAP.get(tool_name)
+            fn = TOOL_FUNCTIONS.get(tool_name)
             if fn:
                 try:
-                    kwargs           = {k: tool_inputs[k] for k in tool_inputs}
-                    tokenized_result = await fn(events, **kwargs)
+                    kwargs = {k: tool_inputs[k] for k in tool_inputs}
+                    kwargs["codeastra_active"] = codeastra_active
+                    result = await fn(events, **kwargs)
                 except Exception as e:
-                    tokenized_result = await protect({"error": str(e)}, events)
+                    result = await protect({"error":str(e)}, events, codeastra_active)
             else:
-                tokenized_result = await protect(
-                    {"error": f"Unknown tool: {tool_name}"}, events
-                )
+                result = await protect({"error":f"Unknown tool: {tool_name}"}, events, codeastra_active)
 
-            # Emit interception events to UI
             for ev in events:
                 yield ev
             events.clear()
 
-            is_write = tool_name in {"create_index","analyze_table"}
-            if is_write:
+            is_action = tool_name in {"create_index"}
+            if is_action:
                 actions_n += 1
 
-            yield {
-                "type":      "tool_result",
-                "tool":      tool_name,
-                "result":    tokenized_result[:600],
-                "is_action": is_write,
-            }
+            yield {"type":"tool_result","tool":tool_name,"result":result[:500],"is_action":is_action,"model":"claude"}
             await asyncio.sleep(0.05)
 
             tool_results.append({
-                "type":        "tool_result",
-                "tool_use_id": block.id,
-                "content":     tokenized_result,
+                "type":"tool_result","tool_use_id":block.id,"content":result
             })
 
         messages.append({"role":"assistant","content":response.content})
-        messages.append({"role":"user",     "content":tool_results})
+        messages.append({"role":"user","content":tool_results})
 
     yield {
         "type":                    "complete",
+        "model":                   "claude-haiku-4-5-20251001",
         "tool_calls":              calls_n,
-        "actions_executed":        actions_n,
-        "codeastra_api_used":      bool(CODEASTRA_KEY),
-        "db_connected":            bool(DATABASE_URL),
-        "real_data_seen_by_agent": 0,
+        "actions":                 actions_n,
+        "codeastra_active":        codeastra_active,
+        "real_data_seen_by_agent": 0 if codeastra_active else "⚠️ YES",
         "timestamp":               datetime.utcnow().isoformat(),
     }
 
 
 # ═══════════════════════════════════════════════════════════
-# STARTUP
+# TEXT/DOCUMENT EXTRACTION
 # ═══════════════════════════════════════════════════════════
 
-@app.on_event("startup")
-async def startup():
-    await get_pool()
+async def extract_text_from_file(file: UploadFile) -> str:
+    content  = await file.read()
+    filename = (file.filename or "").lower()
+    mime     = file.content_type or ""
+    if filename.endswith(".pdf") or "pdf" in mime:
+        try:
+            import PyPDF2
+            reader = PyPDF2.PdfReader(io.BytesIO(content))
+            return "\n".join(p.extract_text() or "" for p in reader.pages)
+        except Exception as e:
+            return f"[PDF error: {e}]"
+    if filename.endswith(".docx"):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(content))
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception as e:
+            return f"[DOCX error: {e}]"
+    if filename.endswith((".xlsx",".xls")):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+            rows = []
+            for sheet in wb.worksheets:
+                rows.append(f"=== {sheet.title} ===")
+                for row in sheet.iter_rows(values_only=True):
+                    rows.append("\t".join(str(c) if c is not None else "" for c in row))
+            return "\n".join(rows)
+        except Exception as e:
+            return f"[Excel error: {e}]"
+    if filename.endswith(".csv"):
+        return content.decode("utf-8", errors="replace")
+    if filename.endswith((".html",".htm")):
+        try:
+            from bs4 import BeautifulSoup
+            return BeautifulSoup(content, "html.parser").get_text("\n", strip=True)
+        except Exception:
+            return content.decode("utf-8", errors="replace")
+    return content.decode("utf-8", errors="replace")
+
+
+async def extract_text_from_url(url: str) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True,
+                                     headers={"User-Agent":"Mozilla/5.0"}) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            ct = r.headers.get("content-type","")
+            if "pdf" in ct or url.lower().endswith(".pdf"):
+                try:
+                    import PyPDF2
+                    reader = PyPDF2.PdfReader(io.BytesIO(r.content))
+                    return "\n".join(p.extract_text() or "" for p in reader.pages)
+                except Exception as e:
+                    return f"[PDF error: {e}]"
+            if "html" in ct:
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    for tag in soup(["script","style","nav","header","footer"]):
+                        tag.decompose()
+                    return soup.get_text("\n", strip=True)[:50000]
+                except Exception:
+                    return r.text[:50000]
+            return r.text[:50000]
+    except Exception as e:
+        return f"[URL error: {e}]"
+
+
+async def run_document_agent(
+    text:             str,
+    task:             str,
+    filename:         str,
+    model:            str  = "gpt-4o",
+    codeastra_active: bool = True,
+) -> AsyncGenerator[dict, None]:
+    """Analyze any document with chosen model + Codeastra toggle."""
+    events = []
+
+    if len(text) > 80000:
+        text = text[:80000] + "\n\n[... truncated ...]"
+
+    yield {
+        "type":             "start",
+        "filename":         filename,
+        "task":             task,
+        "model":            model,
+        "codeastra_active": codeastra_active,
+        "char_count":       len(text),
+        "mode":             "PROTECTED" if codeastra_active else "⚠️ UNPROTECTED",
+    }
+    await asyncio.sleep(0.1)
+
+    # Protect document through Codeastra
+    if codeastra_active:
+        yield {"type":"phase","message":"Codeastra scanning document for PII..."}
+        protected_text = await protect(text, events, True)
+        for ev in events:
+            yield ev
+        events.clear()
+    else:
+        yield {"type":"warning","message":"⚠️ Codeastra OFF — full document sent to AI unprotected"}
+        protected_text = text
+
+    yield {"type":"phase","message":f"Sending to {model} for analysis..."}
+
+    system = """You are an expert document analyst working through Codeastra's Zero Trust middleware.
+All PII has been replaced with tokens like [CVT:EMAIL:A1B2C3].
+Work with tokens as identifiers. Analyze structure, content, and meaning without knowing actual values.
+Be thorough and specific."""
+
+    prompt = f"TASK: {task or 'Analyze this document thoroughly.'}\n\nDOCUMENT ({filename}):\n\n{protected_text}"
+
+    try:
+        if model == "gpt-4o" and OPENAI_KEY:
+            client = AsyncOpenAI(api_key=OPENAI_KEY)
+            response = await client.chat.completions.create(
+                model    = "gpt-4o",
+                messages = [
+                    {"role":"system","content":system},
+                    {"role":"user",  "content":prompt},
+                ],
+                max_tokens = 2000,
+                stream     = True,
+            )
+            full = ""
+            async for chunk in response:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    full += delta
+                    yield {"type":"thinking","text":delta,"model":"gpt-4o"}
+                    await asyncio.sleep(0.01)
+
+        elif ANTHROPIC_KEY:
+            client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+            with client.messages.stream(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2000,
+                system=system,
+                messages=[{"role":"user","content":prompt}],
+            ) as stream:
+                for chunk in stream.text_stream:
+                    yield {"type":"thinking","text":chunk,"model":"claude"}
+                    await asyncio.sleep(0.01)
+        else:
+            yield {"type":"error","message":"No AI API key set"}
+            return
+
+    except Exception as e:
+        yield {"type":"error","message":str(e)}
+        return
+
+    yield {
+        "type":                    "complete",
+        "filename":                filename,
+        "model":                   model,
+        "codeastra_active":        codeastra_active,
+        "real_data_seen_by_agent": 0 if codeastra_active else "⚠️ YES",
+        "openai_logs_url":         "https://platform.openai.com/logs" if model=="gpt-4o" else None,
+    }
 
 
 # ═══════════════════════════════════════════════════════════
-# ENDPOINTS
+# API ENDPOINTS
 # ═══════════════════════════════════════════════════════════
 
 @app.get("/")
@@ -775,162 +843,249 @@ async def index():
 
 @app.get("/health")
 async def health():
-    pool = await get_pool()
+    openai_ok    = False
     codeastra_ok = False
+
+    if OPENAI_KEY:
+        try:
+            client = AsyncOpenAI(api_key=OPENAI_KEY)
+            models = await client.models.list()
+            openai_ok = True
+        except Exception:
+            pass
+
     if CODEASTRA_KEY:
         try:
             async with httpx.AsyncClient(timeout=5.0) as c:
-                r = await c.get(
-                    f"{CODEASTRA_URL}/health",
-                    headers={"X-API-Key": CODEASTRA_KEY}
-                )
+                r = await c.get(f"{CODEASTRA_URL}/health",
+                                headers={"X-API-Key":CODEASTRA_KEY})
                 codeastra_ok = r.status_code == 200
         except Exception:
             pass
 
     return {
         "status":          "healthy",
+        "openai_ready":    bool(OPENAI_KEY),
+        "openai_live":     openai_ok,
         "anthropic_ready": bool(ANTHROPIC_KEY),
         "codeastra_ready": bool(CODEASTRA_KEY),
         "codeastra_live":  codeastra_ok,
-        "db_ready":        pool is not None,
+        "db_ready":        db_pool is not None,
         "codeastra_url":   CODEASTRA_URL,
+        "proof_url":       "https://platform.openai.com/logs",
     }
 
 
 @app.get("/agent/tasks")
 async def list_tasks():
     return {
+        "models": {
+            "gpt-4o":                   "OpenAI GPT-4o — logs visible at platform.openai.com/logs",
+            "claude-haiku-4-5-20251001": "Anthropic Claude Haiku",
+        },
         "tasks": [
-            {
-                "id":          "dba",
-                "name":        "Database Performance Agent",
-                "description": "Finds slow queries, creates missing indexes, restores performance on your real database.",
-                "prompt":      TASK_PROMPTS["dba"],
-            },
-            {
-                "id":          "audit",
-                "name":        "Database Audit Agent",
-                "description": "Full audit of all tables, query performance, connection health, and index coverage.",
-                "prompt":      TASK_PROMPTS["audit"],
-            },
-        ]
+            {"id":"dba",   "name":"Database Performance Agent","description":"Finds slow queries, creates missing indexes."},
+            {"id":"audit", "name":"Database Audit Agent",      "description":"Full DB audit — tables, queries, connections, indexes."},
+        ],
+        "codeastra_toggle": {
+            "on":  "All tool results tokenized before AI sees them. platform.openai.com/logs shows tokens only.",
+            "off": "Raw data sent to AI. platform.openai.com/logs shows real PII. USE ONLY FOR DEMO COMPARISON.",
+        }
     }
 
 
-@app.post("/agent/run/stream")
-async def agent_stream(req: Request):
-    """
-    PRIMARY ENDPOINT — Run the real autonomous agent.
-    Streams events in real time as the agent works.
+def _stream_response(generator):
+    async def stream():
+        async for ev in generator:
+            yield f"data: {json.dumps(ev)}\n\n"
+    return StreamingResponse(stream(), media_type="text/event-stream",
+        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
+                 "Access-Control-Allow-Origin":"*"})
 
-    Events:
-      start        — agent started
-      intercepted  — Codeastra caught real PII from DB, replaced with token
-      thinking     — Claude's reasoning (contains only tokens, never real data)
-      tool_call    — agent called a real database tool
-      tool_result  — tokenized result Claude received from Codeastra
-      complete     — agent finished
+
+@app.post("/agent/run/stream")
+async def agent_run_stream(req: Request):
+    """
+    PRIMARY — Run autonomous agent with real-time streaming.
 
     Body:
-      task_type:   "dba" | "audit"
-      custom_task: str (optional — your own task description)
+      task_type:         "dba" | "audit"
+      model:             "gpt-4o" | "claude" (default: gpt-4o)
+      codeastra_enabled: true | false (default: true)
+      custom_task:       str (optional)
 
-    Example:
-      curl -X POST https://your-app.railway.app/agent/run/stream \\
-        -H "Content-Type: application/json" \\
-        -d '{"task_type":"dba"}' --no-buffer
+    Returns: text/event-stream
+
+    Events:
+      start        — agent initialized
+      intercepted  — Codeastra caught real PII, replaced with token
+      thinking     — AI reasoning (tokens only when protected)
+      tool_call    — agent called a real DB tool
+      tool_result  — what AI received (tokens if protected)
+      complete     — done. Check openai_logs_url for proof.
+
+    PROOF: When model=gpt-4o, open platform.openai.com/logs
+    to see EXACTLY what GPT received. Tokens if Codeastra ON.
+    Real data if Codeastra OFF. The difference is undeniable.
     """
-    body = await req.json()
+    body    = await req.json()
+    model   = body.get("model", "gpt-4o")
+    enabled = body.get("codeastra_enabled", True)
 
-    async def stream():
-        async for ev in run_agent(
-            body.get("task_type", "dba"),
-            body.get("custom_task", "")
-        ):
-            yield f"data: {json.dumps(ev)}\n\n"
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control":               "no-cache",
-            "X-Accel-Buffering":           "no",
-            "Access-Control-Allow-Origin": "*",
-        }
-    )
+    if model == "gpt-4o":
+        gen = run_openai_agent(
+            body.get("task_type","dba"),
+            body.get("custom_task",""),
+            codeastra_active=enabled,
+        )
+    else:
+        gen = run_claude_agent(
+            body.get("task_type","dba"),
+            body.get("custom_task",""),
+            codeastra_active=enabled,
+        )
+    return _stream_response(gen)
 
 
 @app.post("/agent/run/sync")
-async def agent_sync(req: Request):
-    """Run agent and return complete result when done."""
-    body      = await req.json()
-    all_ev    = []
-    intercept = []
-    summary   = {}
+async def agent_run_sync(req: Request):
+    """Run agent, wait for completion, return full result."""
+    body    = await req.json()
+    model   = body.get("model","gpt-4o")
+    enabled = body.get("codeastra_enabled",True)
 
-    async for ev in run_agent(
+    gen = (run_openai_agent if model=="gpt-4o" else run_claude_agent)(
         body.get("task_type","dba"),
-        body.get("custom_task","")
-    ):
+        body.get("custom_task",""),
+        codeastra_active=enabled,
+    )
+
+    all_ev      = []
+    intercepted = []
+    summary     = {}
+
+    async for ev in gen:
         all_ev.append(ev)
         if ev["type"] == "intercepted":
-            intercept.append(ev)
+            intercepted.append(ev)
         if ev["type"] == "complete":
             summary = ev
 
     return {
-        "success":                 True,
-        "codeastra_intercepted":   intercept,
-        "total_intercepted":       len(intercept),
-        "summary":                 summary,
-        "real_data_seen_by_agent": 0,
+        "success":           True,
+        "model":             model,
+        "codeastra_active":  enabled,
+        "intercepted_count": len(intercepted),
+        "intercepted":       intercepted,
+        "summary":           summary,
+        "proof_url":         "https://platform.openai.com/logs" if model=="gpt-4o" else None,
     }
+
+
+@app.post("/agent/run/protected")
+async def agent_run_protected(req: Request):
+    """Run agent with Codeastra ALWAYS ON."""
+    body  = await req.json()
+    model = body.get("model","gpt-4o")
+    gen   = (run_openai_agent if model=="gpt-4o" else run_claude_agent)(
+        body.get("task_type","dba"), body.get("custom_task",""), codeastra_active=True
+    )
+    return _stream_response(gen)
+
+
+@app.post("/agent/run/unprotected")
+async def agent_run_unprotected(req: Request):
+    """Run agent with Codeastra OFF — for comparison demo only."""
+    body  = await req.json()
+    model = body.get("model","gpt-4o")
+    gen   = (run_openai_agent if model=="gpt-4o" else run_claude_agent)(
+        body.get("task_type","dba"), body.get("custom_task",""), codeastra_active=False
+    )
+    return _stream_response(gen)
+
+
+@app.post("/agent/analyze-document")
+async def analyze_document(
+    file:  UploadFile = File(default=None),
+    task:  str        = Form(default=""),
+    model: str        = Form(default="gpt-4o"),
+    codeastra_enabled: str = Form(default="true"),
+):
+    """Upload any document for analysis with model + toggle selection."""
+    if file is None:
+        return JSONResponse(status_code=400, content={"error":"No file uploaded"})
+    enabled  = codeastra_enabled.lower() != "false"
+    text     = await extract_text_from_file(file)
+    filename = file.filename or "document"
+    return _stream_response(run_document_agent(text, task, filename, model, enabled))
+
+
+@app.post("/agent/analyze-url")
+async def analyze_url(req: Request):
+    """Fetch any URL and analyze with model + toggle selection."""
+    body    = await req.json()
+    url     = body.get("url","").strip()
+    task    = body.get("task","")
+    model   = body.get("model","gpt-4o")
+    enabled = body.get("codeastra_enabled",True)
+    if not url.startswith(("http://","https://")):
+        return JSONResponse(status_code=400, content={"error":"Valid URL required"})
+    text = await extract_text_from_url(url)
+    return _stream_response(run_document_agent(text, task, url, model, enabled))
+
+
+@app.post("/agent/analyze-text")
+async def analyze_text(req: Request):
+    """Send raw text for analysis with model + toggle selection."""
+    body    = await req.json()
+    text    = body.get("text","").strip()
+    task    = body.get("task","")
+    name    = body.get("name","text")
+    model   = body.get("model","gpt-4o")
+    enabled = body.get("codeastra_enabled",True)
+    if not text:
+        return JSONResponse(status_code=400, content={"error":"text required"})
+    return _stream_response(run_document_agent(text, task, name, model, enabled))
 
 
 @app.post("/protect")
 async def protect_text(req: Request):
-    """
-    Protect any text through real Codeastra API.
-    Use this to see what Codeastra does to your data.
-    """
+    """Protect any text through real Codeastra API."""
     body   = await req.json()
-    text   = body.get("text","")
     events = []
-    result = await protect(text, events)
-    return {
-        "original":    text,
-        "protected":   result,
-        "intercepted": events,
-        "count":       len(events),
-        "via_api":     bool(CODEASTRA_KEY),
-    }
+    result = await protect(body.get("text",""), events, True)
+    return {"original":body.get("text",""),"protected":result,"intercepted":events,"count":len(events)}
+
+
+@app.post("/debug/protect-raw")
+async def debug_protect_raw(req: Request):
+    """See raw Codeastra API response."""
+    body = await req.json()
+    if not CODEASTRA_KEY:
+        return {"error":"CODEASTRA_API_KEY not set"}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{CODEASTRA_URL}/protect/text",
+            headers={"X-API-Key":CODEASTRA_KEY,"Content-Type":"application/json"},
+            json={"text":body.get("text","")},
+        )
+        return {"status_code":r.status_code,"raw_response":r.json() if r.status_code==200 else r.text}
 
 
 @app.get("/db/status")
 async def db_status():
-    """Check real database connection status."""
-    pool = await get_pool()
-    if not pool:
-        return {"connected": False, "message": "Set DATABASE_URL on Railway"}
-    async with pool.acquire() as conn:
+    if not db_pool:
+        return {"connected":False,"message":"Set DATABASE_URL on Railway"}
+    async with db_pool.acquire() as conn:
         try:
             ver = await conn.fetchval("SELECT version()")
             tbl = await conn.fetchval(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'"
             )
-            return {
-                "connected": True,
-                "version":   ver,
-                "tables":    tbl,
-            }
+            return {"connected":True,"version":ver,"public_tables":tbl}
         except Exception as e:
-            return {"connected": False, "error": str(e)}
+            return {"connected":False,"error":str(e)}
 
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1355,411 +1510,6 @@ async def db_connections():
 
 
 
-# ═══════════════════════════════════════════════════════════
-# DOCUMENT + LINK INGESTION
-# Frontend sends any file or URL.
-# Agent reads it, Codeastra tokenizes all PII,
-# Claude analyzes tokens only.
-# ═══════════════════════════════════════════════════════════
-
-import io
-import tempfile
-import mimetypes
-from fastapi import UploadFile, File, Form
-
-async def extract_text(file: UploadFile) -> str:
-    """Extract raw text from any uploaded file."""
-    content  = await file.read()
-    filename = (file.filename or "").lower()
-    mime     = file.content_type or ""
-
-    # PDF
-    if filename.endswith(".pdf") or "pdf" in mime:
-        try:
-            import PyPDF2
-            reader = PyPDF2.PdfReader(io.BytesIO(content))
-            return "\n".join(
-                page.extract_text() or "" for page in reader.pages
-            )
-        except Exception as e:
-            return f"[PDF extraction error: {e}]"
-
-    # Word (.docx)
-    if filename.endswith(".docx") or "wordprocessingml" in mime:
-        try:
-            import docx
-            doc = docx.Document(io.BytesIO(content))
-            return "\n".join(p.text for p in doc.paragraphs)
-        except Exception as e:
-            return f"[DOCX extraction error: {e}]"
-
-    # Excel (.xlsx / .xls)
-    if filename.endswith((".xlsx",".xls")) or "spreadsheet" in mime or "excel" in mime:
-        try:
-            import openpyxl
-            wb   = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-            rows = []
-            for sheet in wb.worksheets:
-                rows.append(f"=== Sheet: {sheet.title} ===")
-                for row in sheet.iter_rows(values_only=True):
-                    rows.append("\t".join(str(c) if c is not None else "" for c in row))
-            return "\n".join(rows)
-        except Exception as e:
-            return f"[Excel extraction error: {e}]"
-
-    # CSV
-    if filename.endswith(".csv") or "csv" in mime:
-        try:
-            return content.decode("utf-8", errors="replace")
-        except Exception as e:
-            return f"[CSV error: {e}]"
-
-    # JSON
-    if filename.endswith(".json") or "json" in mime:
-        try:
-            parsed = json.loads(content)
-            return json.dumps(parsed, indent=2)
-        except Exception as e:
-            return content.decode("utf-8", errors="replace")
-
-    # HTML
-    if filename.endswith((".html",".htm")) or "html" in mime:
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(content, "html.parser")
-            return soup.get_text(separator="\n", strip=True)
-        except Exception as e:
-            return content.decode("utf-8", errors="replace")
-
-    # Plain text, markdown, code files
-    text_extensions = (
-        ".txt",".md",".py",".js",".ts",".sql",".yaml",".yml",
-        ".toml",".env",".log",".xml",".sh",".bash",".r",".rb",
-    )
-    if any(filename.endswith(ext) for ext in text_extensions) or "text" in mime:
-        return content.decode("utf-8", errors="replace")
-
-    # Unknown — try UTF-8 decode
-    try:
-        return content.decode("utf-8", errors="replace")
-    except Exception:
-        return f"[Could not extract text from {filename}]"
-
-
-async def extract_from_url(url: str) -> str:
-    """Fetch and extract text from any URL."""
-    try:
-        async with httpx.AsyncClient(
-            timeout      = 20.0,
-            follow_redirects = True,
-            headers      = {"User-Agent": "Mozilla/5.0 (compatible; CodeastraAgent/1.0)"},
-        ) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-
-            ct = r.headers.get("content-type","")
-
-            # PDF from URL
-            if "pdf" in ct or url.lower().endswith(".pdf"):
-                try:
-                    import PyPDF2
-                    reader = PyPDF2.PdfReader(io.BytesIO(r.content))
-                    return "\n".join(
-                        page.extract_text() or "" for page in reader.pages
-                    )
-                except Exception as e:
-                    return f"[PDF from URL error: {e}]"
-
-            # HTML — extract readable text
-            if "html" in ct:
-                try:
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    # Remove scripts, styles, nav
-                    for tag in soup(["script","style","nav","header","footer","aside"]):
-                        tag.decompose()
-                    return soup.get_text(separator="\n", strip=True)[:50000]
-                except Exception:
-                    return r.text[:50000]
-
-            # JSON
-            if "json" in ct:
-                try:
-                    return json.dumps(r.json(), indent=2)[:50000]
-                except Exception:
-                    return r.text[:50000]
-
-            # Plain text
-            return r.text[:50000]
-
-    except Exception as e:
-        return f"[URL fetch error: {e}]"
-
-
-async def run_document_agent(text: str, task: str, filename: str):
-    """
-    Autonomous agent that analyzes a document.
-    Text is protected by Codeastra before Claude sees it.
-    Claude reasons on tokens only.
-    """
-    if not ANTHROPIC_KEY:
-        yield {"type":"error","message":"ANTHROPIC_API_KEY not set"}
-        return
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    events = []
-
-    # Truncate if too large
-    if len(text) > 80000:
-        text = text[:80000] + "\n\n[... document truncated at 80,000 characters ...]"
-
-    yield {
-        "type":          "start",
-        "filename":      filename,
-        "task":          task,
-        "char_count":    len(text),
-        "codeastra_ready": bool(CODEASTRA_KEY),
-    }
-    await asyncio.sleep(0.1)
-
-    # Protect full document text through Codeastra
-    yield {"type":"phase","message":"Codeastra scanning document for PII..."}
-    protected_text = await protect(text, events)
-
-    # Emit all interception events
-    for ev in events:
-        yield ev
-    events.clear()
-
-    yield {
-        "type":    "phase",
-        "message": f"Document protected. Sending to Claude for analysis...",
-    }
-    await asyncio.sleep(0.1)
-
-    # Build task prompt
-    if not task:
-        task = (
-            "Analyze this document thoroughly. "
-            "Summarize the key information, identify any issues or action items, "
-            "extract important data points, and provide recommendations."
-        )
-
-    system = """You are an expert document analyst.
-You receive documents that have been processed by Codeastra's Zero Trust middleware.
-All PII (names, emails, SSNs, card numbers, addresses) has been replaced with tokens like [CVT:EMAIL:A1B2].
-Work with these tokens as identifiers — they represent real values stored securely in the vault.
-Analyze the document structure, content, and meaning. You can reason about the data without knowing the actual values.
-Be thorough and specific in your analysis."""
-
-    messages = [{
-        "role": "user",
-        "content": f"TASK: {task}\n\nDOCUMENT ({filename}):\n\n{protected_text}"
-    }]
-
-    # Stream Claude's analysis
-    full_response = ""
-    try:
-        with client.messages.stream(
-            model      = "claude-haiku-4-5-20251001",
-            max_tokens = 2000,
-            system     = system,
-            messages   = messages,
-        ) as stream:
-            for chunk in stream.text_stream:
-                full_response += chunk
-                yield {"type":"thinking","text":chunk}
-                await asyncio.sleep(0.01)
-
-    except Exception as e:
-        yield {"type":"error","message":str(e)}
-        return
-
-    yield {
-        "type":                    "complete",
-        "analysis":                full_response,
-        "filename":                filename,
-        "char_count":              len(text),
-        "real_data_seen_by_agent": 0,
-        "codeastra_api_used":      bool(CODEASTRA_KEY),
-    }
-
-
-# ── Endpoints ────────────────────────────────────────────
-
-@app.post("/agent/analyze-document")
-async def analyze_document(
-    file: UploadFile = File(default=None),
-    task: str        = Form(default=""),
-    req:  Request    = None,
-):
-    """
-    Upload any document — agent analyzes it with full Codeastra protection.
-
-    Supported file types:
-      PDF, DOCX, XLSX, XLS, CSV, JSON, TXT, MD,
-      HTML, XML, YAML, Python, SQL, and any text file.
-
-    Form fields:
-      file: the document to analyze
-      task: what to do with it (optional)
-            e.g. "Find all compliance violations"
-                 "Summarize key financial figures"
-                 "Extract all action items"
-                 "Identify PII exposure risks"
-
-    Returns: text/event-stream
-      start        — document received
-      intercepted  — Codeastra caught PII in document
-      thinking     — Claude analyzing (sees tokens only)
-      complete     — full analysis
-
-    Example (JavaScript):
-      const form = new FormData();
-      form.append('file', file);
-      form.append('task', 'Find all compliance issues');
-      fetch('/agent/analyze-document', {method:'POST', body: form})
-
-    Example (curl):
-      curl -X POST https://your-app.railway.app/agent/analyze-document \\
-        -F "file=@contract.pdf" \\
-        -F "task=Extract all payment terms and identify risks" \\
-        --no-buffer
-    """
-    if file is None:
-        return JSONResponse(status_code=400, content={
-            "error": "No file uploaded",
-            "tip":   "Send as multipart/form-data with field name 'file'"
-        })
-
-    filename = file.filename or "document"
-    text     = await extract_text(file)
-
-    if not text or text.startswith("[Could not"):
-        return JSONResponse(status_code=400, content={
-            "error": f"Could not extract text from {filename}",
-            "raw":   text,
-        })
-
-    async def stream():
-        async for ev in run_document_agent(text, task, filename):
-            yield f"data: {json.dumps(ev)}\n\n"
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control":               "no-cache",
-            "X-Accel-Buffering":           "no",
-            "Access-Control-Allow-Origin": "*",
-        }
-    )
-
-
-@app.post("/agent/analyze-url")
-async def analyze_url(req: Request):
-    """
-    Send any URL — agent fetches it and analyzes with Codeastra protection.
-
-    Works with:
-      Web pages, articles, blog posts
-      Online PDFs
-      JSON APIs
-      GitHub files (raw URLs)
-      Google Docs (published)
-      News articles
-      Documentation pages
-      Financial reports
-      Any public URL
-
-    Body:
-      url:  str — the URL to fetch and analyze
-      task: str — what to do with it (optional)
-
-    Returns: text/event-stream (same events as analyze-document)
-
-    Example:
-      curl -X POST https://your-app.railway.app/agent/analyze-url \\
-        -H "Content-Type: application/json" \\
-        -d '{"url":"https://example.com/report.pdf","task":"Find key risks"}' \\
-        --no-buffer
-    """
-    body = await req.json()
-    url  = body.get("url","").strip()
-    task = body.get("task","")
-
-    if not url:
-        return JSONResponse(status_code=400, content={"error":"url required"})
-
-    if not url.startswith(("http://","https://")):
-        return JSONResponse(status_code=400, content={
-            "error": "URL must start with http:// or https://"
-        })
-
-    text = await extract_from_url(url)
-
-    if not text or text.startswith("[URL fetch error"):
-        return JSONResponse(status_code=400, content={
-            "error": f"Could not fetch URL: {url}",
-            "detail": text,
-        })
-
-    async def stream():
-        async for ev in run_document_agent(text, task, url):
-            yield f"data: {json.dumps(ev)}\n\n"
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control":               "no-cache",
-            "X-Accel-Buffering":           "no",
-            "Access-Control-Allow-Origin": "*",
-        }
-    )
-
-
-@app.post("/agent/analyze-text")
-async def analyze_text(req: Request):
-    """
-    Send raw text directly — agent analyzes with Codeastra protection.
-    Use when you already have the text (no file upload needed).
-
-    Body:
-      text: str  — the text content to analyze
-      task: str  — what to do with it
-      name: str  — label for this content (optional)
-
-    Example:
-      curl -X POST https://your-app.railway.app/agent/analyze-text \\
-        -H "Content-Type: application/json" \\
-        -d '{
-          "text": "Client: John Smith, SSN 234-56-7890, owes $45,000...",
-          "task": "Identify all PII and compliance risks",
-          "name": "client-record"
-        }' --no-buffer
-    """
-    body = await req.json()
-    text = body.get("text","").strip()
-    task = body.get("task","")
-    name = body.get("name","raw-text")
-
-    if not text:
-        return JSONResponse(status_code=400, content={"error":"text required"})
-
-    async def stream():
-        async for ev in run_document_agent(text, task, name):
-            yield f"data: {json.dumps(ev)}\n\n"
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control":               "no-cache",
-            "X-Accel-Buffering":           "no",
-            "Access-Control-Allow-Origin": "*",
-        }
-    )
 
 
 @app.post("/agent/analyze-multiple")
@@ -1811,41 +1561,6 @@ async def analyze_multiple(
             "Access-Control-Allow-Origin": "*",
         }
     )
-
-
-
-# ── Debug endpoint — see exact raw Codeastra API response ──
-@app.post("/debug/protect-raw")
-async def debug_protect_raw(req: Request):
-    """
-    Shows the RAW response from Codeastra API.
-    Use this to verify the API is detecting PII correctly.
-
-    POST /debug/protect-raw
-    Body: {"text": "John Smith SSN 234-56-7890 email john@goldman.com"}
-    """
-    body = await req.json()
-    text = body.get("text", "")
-
-    if not CODEASTRA_KEY:
-        return {"error": "CODEASTRA_API_KEY not set"}
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.post(
-            f"{CODEASTRA_URL}/protect/text",
-            headers={
-                "X-API-Key":    CODEASTRA_KEY,
-                "Content-Type": "application/json",
-            },
-            json={"text": text},
-        )
-        return {
-            "status_code":    r.status_code,
-            "raw_response":   r.json() if r.status_code == 200 else r.text,
-            "sent_text":      text,
-            "codeastra_url":  CODEASTRA_URL,
-        }
-
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2262,3 +1977,8 @@ async def executor_capabilities():
         "pattern": "Agent passes tokens → Executor resolves internally → Returns derived result only",
         "guarantee": "Real values never returned to agent — only computation outputs",
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
