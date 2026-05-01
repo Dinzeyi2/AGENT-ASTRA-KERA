@@ -75,8 +75,26 @@ async def startup():
 # CODEASTRA — Real API
 # ═══════════════════════════════════════════════════════════
 
+def _json_safe(obj):
+    """Make any object JSON serializable — handles Decimal, datetime, bytes, etc."""
+    import decimal, datetime as _dt
+    if isinstance(obj, decimal.Decimal):
+        return float(obj)
+    if isinstance(obj, (_dt.datetime, _dt.date)):
+        return obj.isoformat()
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(i) for i in obj]
+    return str(obj)
+
 async def protect(data, events: list, active: bool = True) -> str:
-    text = json.dumps(data) if not isinstance(data, str) else data
+    # Sanitize before JSON serialization
+    if isinstance(data, dict):
+        data = _json_safe(data)
+    text = json.dumps(data, default=_json_safe) if not isinstance(data, str) else data
     if not active:
         events.append({"type":"unprotected","preview":text[:120]})
         return text
@@ -164,7 +182,7 @@ async def tool_list_tables(events, active=True):
                 WHERE table_schema='public'
                 ORDER BY pg_total_relation_size(quote_ident(table_name)) DESC
             """)
-            real = {"tables":[dict(r) for r in rows],"count":len(rows)}
+            real = {"tables":[_safe_row(r) for r in rows],"count":len(rows)}
         except Exception as e:
             real = {"error":str(e)}
     return await protect(real, events, active)
@@ -183,7 +201,7 @@ async def tool_scan_slow_queries(events, active=True):
                 WHERE mean_exec_time > 100
                 ORDER BY mean_exec_time DESC LIMIT 20
             """)
-            real = {"slow_queries":[dict(r) for r in rows],"count":len(rows)}
+            real = {"slow_queries":[_safe_row(r) for r in rows],"count":len(rows)}
         except Exception as e:
             real = {"error":str(e),"hint":"Enable pg_stat_statements"}
     return await protect(real, events, active)
@@ -211,8 +229,8 @@ async def tool_inspect_table(events, table: str, active=True):
                 sample_list = [dict(r) for r in samples]
             except Exception:
                 sample_list = []
-            real = {"table":table,"columns":[dict(c) for c in cols],
-                    "indexes":[dict(i) for i in idxs],
+            real = {"table":table,"columns":[_safe_row(c) for c in cols],
+                    "indexes":[_safe_row(i) for i in idxs],
                     "row_count":count,"samples":sample_list}
         except Exception as e:
             real = {"error":str(e),"table":table}
@@ -241,7 +259,7 @@ async def tool_run_query(events, sql: str, active=True):
     async with db_pool.acquire() as conn:
         try:
             rows = await conn.fetch(sql)
-            real = {"sql":sql,"rows":[dict(r) for r in rows],"count":len(rows)}
+            real = {"sql":sql,"rows":[_safe_row(r) for r in rows],"count":len(rows)}
         except Exception as e:
             real = {"error":str(e),"sql":sql}
     return await protect(real, events, active)
@@ -261,7 +279,7 @@ async def tool_get_db_stats(events, active=True):
                        pg_size_pretty(pg_database_size(current_database())) AS db_size
                 FROM pg_stat_database WHERE datname=current_database()
             """)
-            real = dict(stats) if stats else {}
+            real = _safe_row(stats) if stats else {}
         except Exception as e:
             real = {"error":str(e)}
     return await protect(real, events, active)
@@ -330,6 +348,21 @@ TOOL_FNS = {
     "check_threshold":     tool_check_threshold,
     "concentration_check": tool_concentration_check,
 }
+
+def _safe_row(row) -> dict:
+    """Convert asyncpg Record to plain dict with JSON-safe values."""
+    import decimal, datetime as _dt
+    result = {}
+    for key, val in dict(row).items():
+        if isinstance(val, decimal.Decimal):
+            result[key] = float(val)
+        elif isinstance(val, (_dt.datetime, _dt.date)):
+            result[key] = val.isoformat()
+        elif isinstance(val, bytes):
+            result[key] = val.decode("utf-8", errors="replace")
+        else:
+            result[key] = val
+    return result
 
 OPENAI_TOOLS = [
     {"type":"function","function":{"name":"list_tables","description":"List all database tables with sizes. Start here.","parameters":{"type":"object","properties":{},"required":[]}}},
@@ -608,10 +641,11 @@ async def run_openai_agent(
             response = await client.responses.create(
                 model    = "gpt-4o",
                 input    = messages,
+                store    = True,   # ← required for traces to appear in OpenAI dashboard
                 tools    = [
                     {
-                        "type":     "function",
-                        "name":     t["function"]["name"],
+                        "type":        "function",
+                        "name":        t["function"]["name"],
                         "description": t["function"]["description"],
                         "parameters":  t["function"]["parameters"],
                     }
@@ -1425,3 +1459,110 @@ async def list_tasks():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
+
+# ── Test OpenAI Responses API directly ───────────────────
+@app.post("/debug/test-responses-api")
+async def test_responses_api():
+    """
+    Test that OpenAI Responses API is working and traces appear.
+    Call this after deploying — then check platform.openai.com/traces
+    You should see a trace appear within 30 seconds.
+    """
+    if not OPENAI_KEY:
+        return {"error": "OPENAI_API_KEY not set"}
+
+    client = AsyncOpenAI(api_key=OPENAI_KEY)
+
+    try:
+        response = await client.responses.create(
+            model  = "gpt-4o",
+            input  = "Say exactly: CODEASTRA TRACE TEST SUCCESSFUL",
+            store  = True,
+        )
+        output_text = ""
+        for item in getattr(response, "output", []):
+            if getattr(item, "type", "") == "message":
+                for c in getattr(item, "content", []):
+                    if getattr(c, "type", "") == "output_text":
+                        output_text += getattr(c, "text", "")
+
+        return {
+            "success":      True,
+            "response_id":  getattr(response, "id", "unknown"),
+            "output":       output_text,
+            "store":        True,
+            "check_traces": "https://platform.openai.com/traces",
+            "message":      "Go to platform.openai.com/traces — you should see this call within 30 seconds",
+        }
+    except Exception as e:
+        # Try without store param (older API version)
+        try:
+            response = await client.responses.create(
+                model = "gpt-4o",
+                input = "Say exactly: CODEASTRA TRACE TEST SUCCESSFUL",
+            )
+            return {
+                "success":    True,
+                "response_id": getattr(response, "id", "unknown"),
+                "store_param": "not supported in this API version",
+                "check_traces": "https://platform.openai.com/traces",
+            }
+        except Exception as e2:
+            return {
+                "success":       False,
+                "error":         str(e2),
+                "responses_api": "may not be available — using Chat Completions fallback",
+                "alternative":   "Traces visible at platform.openai.com/logs (Usage tab)",
+            }
+
+
+@app.get("/debug/openai-status")
+async def openai_status():
+    """Check OpenAI API status and which features are available."""
+    if not OPENAI_KEY:
+        return {"error": "OPENAI_API_KEY not set"}
+
+    client = AsyncOpenAI(api_key=OPENAI_KEY)
+    results = {}
+
+    # Test Chat Completions
+    try:
+        r = await client.chat.completions.create(
+            model    = "gpt-4o",
+            messages = [{"role":"user","content":"ping"}],
+            max_tokens = 5,
+        )
+        results["chat_completions"] = {
+            "available": True,
+            "model":     r.model,
+            "logs_url":  "https://platform.openai.com/usage",
+        }
+    except Exception as e:
+        results["chat_completions"] = {"available":False,"error":str(e)}
+
+    # Test Responses API
+    try:
+        r = await client.responses.create(
+            model = "gpt-4o",
+            input = "ping",
+            store = True,
+        )
+        results["responses_api"] = {
+            "available":    True,
+            "response_id":  getattr(r, "id", "unknown"),
+            "traces_url":   "https://platform.openai.com/traces",
+            "message":      "✅ Traces WILL appear in platform.openai.com/traces",
+        }
+    except Exception as e:
+        results["responses_api"] = {
+            "available": False,
+            "error":     str(e),
+            "fallback":  "Using Chat Completions — visible in Usage tab, not Traces tab",
+        }
+
+    return {
+        "openai_key_set": True,
+        "features":       results,
+        "trace_proof_url": "https://platform.openai.com/traces",
+    }
