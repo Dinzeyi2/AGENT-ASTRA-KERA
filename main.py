@@ -28,7 +28,7 @@ import asyncpg
 from openai import AsyncOpenAI
 # OpenAI Agents SDK — required for traces to appear in platform.openai.com/traces
 from agents import (
-    Agent, Runner, function_tool, trace, gen_trace_id, RunConfig
+    Agent, Runner, function_tool, trace, gen_trace_id, RunConfig, flush_traces
 )
 import agents as _agents_sdk
 from fastapi import FastAPI, Request, UploadFile, File, Form
@@ -733,11 +733,14 @@ async def run_openai_agent(
                 max_turns      = 20,
                 run_config     = run_config,
             )
+        # flush_traces() required in FastAPI — traces are batched, must force export
+        flush_traces()
 
     except Exception as e:
         agent_trace.add_step("error", {"message":str(e)})
         yield {"type":"error","message":str(e),"trace_id":agent_trace.id}
         agent_trace.complete()
+        flush_traces()
         return
 
     # ── Emit events from shared state ────────────────────────
@@ -942,24 +945,33 @@ Be thorough and specific."""
         yield {"type":"error","message":"OPENAI_API_KEY not set"}
         return
 
-    client = AsyncOpenAI(api_key=OPENAI_KEY)
+    import openai as _oai
+    _oai.api_key = OPENAI_KEY
+
+    doc_agent = Agent(
+        name         = "Codeastra Document Analyst",
+        instructions = system,
+        model        = "gpt-4o",
+    )
+    doc_trace_id   = gen_trace_id()
+    doc_run_config = RunConfig(
+        workflow_name                = "codeastra-document-analysis",
+        trace_id                     = doc_trace_id,
+        trace_include_sensitive_data = False,
+        trace_metadata               = {"filename": filename, "codeastra_active": str(codeastra_active)},
+    )
+    _doc_input = "TASK: " + (task or "Analyze this document thoroughly.") + "\n\nDOCUMENT (" + filename + "):\n\n" + protected_text
     try:
-        response = await client.chat.completions.create(
-            model    = "gpt-4o",
-            messages = [
-                {"role":"system","content":system},
-                {"role":"user","content":f"TASK: {task or 'Analyze this document.'}\n\nDOCUMENT ({filename}):\n\n{protected_text}"},
-            ],
-            max_tokens = 2000,
-            stream     = True,
-        )
-        full = ""
-        async for chunk in response:
-            delta = chunk.choices[0].delta.content or ""
-            if delta:
-                full += delta
-                yield {"type":"thinking","text":delta,"trace_id":trace.id}
-                await asyncio.sleep(0.01)
+        with trace("codeastra-document-analysis", trace_id=doc_trace_id):
+            doc_result = await Runner.run(
+                starting_agent = doc_agent,
+                input          = _doc_input,
+                max_turns      = 1,
+                run_config     = doc_run_config,
+            )
+        flush_traces()
+        full = str(doc_result.final_output) if doc_result.final_output else ""
+        yield {"type":"thinking","text":full,"trace_id":agent_trace.id}
     except Exception as e:
         yield {"type":"error","message":str(e)}
         return
