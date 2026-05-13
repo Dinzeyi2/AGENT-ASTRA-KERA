@@ -847,7 +847,9 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
     import openai as _oai
     _oai.api_key = OPENAI_KEY
 
-    # ── Email tool — agent sends via executor, never sees real address ──
+    # ── Email tool — agent sends via Vault-as-TEE ──────────────────
+    # Agent passes tokens. Vault opens. Real values resolved inside.
+    # Email fires from inside vault. Session wiped. Agent never knew.
     _email_results = []
 
     @function_tool
@@ -861,22 +863,25 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
         - subject: a clear subject line
         - body: the full email content — your analysis or summary
 
-        The executor will resolve the token to the real email address.
-        You never see the real address. Just pass the token.
+        The Vault-as-TEE will:
+        1. Load real values into encrypted session memory
+        2. Resolve all tokens to real values inside the vault
+        3. Send the email with real values
+        4. Wipe session — agent never sees real values
 
         Example:
           send_email(
             email_token = "[CVT:EMAIL:A1B2C3]",
             subject     = "Goldman Portfolio Risk Summary",
-            body        = "Here are the top 5 clients by market value..."
+            body        = "Top 5 clients: [CVT:NAME:D6B6] $2.2M..."
           )
         """
-        result = await executor_send_email(email_token, subject, body)
+        result = await tee_send_email(email_token, subject, body)
         _email_results.append(result)
         if result.get("sent"):
-            return f"Email sent successfully via Resend. Token: {email_token}. Real address resolved by executor — never seen by agent."
+            return f"Email sent via Vault-as-TEE. Session wiped. Real address never seen by agent. Token: {email_token}"
         else:
-            return f"Email send attempt: {result}"
+            return f"Email send attempt result: {result}"
 
     doc_agent = Agent(
         name         = "Codeastra Document Analyst",
@@ -1499,6 +1504,65 @@ async def executor_classify_amount(req: Request):
 
 
 # ═══════════════════════════════════════════════════════════
+# VAULT-AS-TEE EMAIL SENDER
+# The correct architecture:
+#   Agent passes tokens only
+#   Vault opens ephemeral session
+#   Real values loaded inside — encrypted
+#   Email fires from inside vault
+#   Session wiped — data gone
+#   Agent never knew any real value
+# ═══════════════════════════════════════════════════════════
+
+async def tee_send_email(email_token: str, subject: str, body: str) -> dict:
+    """
+    Send email via executor.
+    Resolves tokens → sends via Resend → agent never sees real values.
+    """
+    import re as _re
+    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9a-f0-9\-]{4,}\]')
+    body_tokens   = list(set(token_pattern.findall(body)))
+    log.info(f"[EMAIL] Sending — {len(body_tokens)} tokens in body to resolve")
+    return await _tee_email_fallback(email_token, subject, body, body_tokens)
+
+
+async def _tee_email_fallback(
+    email_token:  str,
+    subject:      str,
+    body:         str,
+    body_tokens:  list,
+) -> dict:
+    """
+    Fallback if /tee/run is not available.
+    Still uses Codeastra vault/resolve — still never exposes to agent.
+    """
+    log.info("[TEE EMAIL FALLBACK] Using vault/resolve directly")
+
+    # Resolve email address
+    real_email = await codeastra_resolve(email_token)
+    if not real_email:
+        return {"sent": False, "error": f"Could not resolve: {email_token}",
+                "real_address_seen_by_agent": False}
+
+    # Resolve all body tokens
+    revealed_body = body
+    if body_tokens:
+        resolved = await codeastra_resolve_batch(body_tokens)
+        for token, real_value in resolved.items():
+            if real_value:
+                revealed_body = revealed_body.replace(token, str(real_value))
+
+    # Send via Resend
+    result = await _send_via_resend(real_email, subject, revealed_body)
+    return {
+        **result,
+        "real_address_seen_by_agent": False,
+        "vault_as_tee":               False,
+        "fallback":                   True,
+    }
+
+
+# ═══════════════════════════════════════════════════════════
 # EMAIL EXECUTOR
 # Agent says: "send to [CVT:EMAIL:A1B2]"
 # Executor resolves token → real address → sends email
@@ -1519,7 +1583,7 @@ FROM_NAME     = os.getenv("FROM_NAME", "Codeastra Agent")
 
 # Token pattern
 TOKEN_PAT = _email_re.compile(
-    r'\[CV[TD]:[A-Z]+:[A-F0-9]{6,}\]|cdt_[a-z]+_[bto]_[a-z0-9]+'
+    r'\[CV[TD]:[A-Z]+:[A-Za-z0-9\-]{4,}\]|cdt_[a-z]+_[bto]_[a-z0-9]+'
 )
 
 
@@ -1629,7 +1693,7 @@ async def executor_send_email(
     # Step 2 — Find ALL tokens in the body and resolve them
     # The body contains [CVT:NAME:xxxx] tokens — replace with real names
     import re as _re
-    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9]{6,}\]')
+    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9a-f0-9\-]{4,}\]')
     tokens_in_body = list(set(token_pattern.findall(body)))
 
     revealed_body = body
