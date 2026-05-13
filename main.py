@@ -1534,7 +1534,7 @@ async def tee_send_email(email_token: str, subject: str, body: str) -> dict:
     Resolves tokens → sends via Resend → agent never sees real values.
     """
     import re as _re
-    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9a-f0-9\-]{4,}\]')
+    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-Za-z0-9\-]{4,}\]')
     body_tokens   = list(set(token_pattern.findall(body)))
     log.info(f"[EMAIL] Sending — {len(body_tokens)} tokens in body to resolve")
     return await _tee_email_fallback(email_token, subject, body, body_tokens)
@@ -1705,20 +1705,30 @@ async def executor_send_email(
         }
 
     # Step 2 — Find ALL tokens in the body and resolve them
-    # The body contains [CVT:NAME:xxxx] tokens — replace with real names
+    # Cast wide net — match any CVT token format
     import re as _re
-    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9a-f0-9\-]{4,}\]')
+    token_pattern  = _re.compile(r'\[CV[TD]:[A-Z]+:[A-Za-z0-9\-]{4,}\]')
     tokens_in_body = list(set(token_pattern.findall(body)))
 
     revealed_body = body
     if tokens_in_body:
-        # Batch resolve all tokens in body
+        # Batch resolve all tokens — one API call
         resolved = await codeastra_resolve_batch(tokens_in_body)
-        # Replace tokens with real values in the body
-        for token, real_value in resolved.items():
+        # Replace every token with its real value
+        for tok, real_value in resolved.items():
             if real_value:
-                revealed_body = revealed_body.replace(token, str(real_value))
-        log.info(f"[EMAIL EXECUTOR] Resolved {len(resolved)} tokens in email body")
+                revealed_body = revealed_body.replace(tok, str(real_value))
+        log.info(f"[EMAIL EXECUTOR] Resolved {len(resolved)}/{len(tokens_in_body)} tokens in body")
+
+        # Any tokens still unreplaced — try individual resolve
+        still_tokens = list(set(token_pattern.findall(revealed_body)))
+        if still_tokens:
+            log.info(f"[EMAIL EXECUTOR] {len(still_tokens)} tokens still unresolved — trying individually")
+            for tok in still_tokens:
+                real = await codeastra_resolve(tok)
+                if real:
+                    revealed_body = revealed_body.replace(tok, str(real))
+                    log.info(f"[EMAIL EXECUTOR] individually resolved: {tok}")
 
     # Step 3 — Send with real values in body
     if EMAIL_SERVICE == "sendgrid" and SENDGRID_KEY:
