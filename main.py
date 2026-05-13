@@ -847,9 +847,7 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
     import openai as _oai
     _oai.api_key = OPENAI_KEY
 
-    # ── Email tool — agent sends via Vault-as-TEE ──────────────────
-    # Agent passes tokens. Vault opens. Real values resolved inside.
-    # Email fires from inside vault. Session wiped. Agent never knew.
+    # ── Email tool — agent sends via executor, never sees real address ──
     _email_results = []
 
     @function_tool
@@ -863,25 +861,22 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
         - subject: a clear subject line
         - body: the full email content — your analysis or summary
 
-        The Vault-as-TEE will:
-        1. Load real values into encrypted session memory
-        2. Resolve all tokens to real values inside the vault
-        3. Send the email with real values
-        4. Wipe session — agent never sees real values
+        The executor will resolve the token to the real email address.
+        You never see the real address. Just pass the token.
 
         Example:
           send_email(
             email_token = "[CVT:EMAIL:A1B2C3]",
             subject     = "Goldman Portfolio Risk Summary",
-            body        = "Top 5 clients: [CVT:NAME:D6B6] $2.2M..."
+            body        = "Here are the top 5 clients by market value..."
           )
         """
-        result = await tee_send_email(email_token, subject, body)
+        result = await executor_send_email(email_token, subject, body)
         _email_results.append(result)
         if result.get("sent"):
-            return f"Email sent via Vault-as-TEE. Session wiped. Real address never seen by agent. Token: {email_token}"
+            return f"Email sent successfully via Resend. Token: {email_token}. Real address resolved by executor — never seen by agent."
         else:
-            return f"Email send attempt result: {result}"
+            return f"Email send attempt: {result}"
 
     doc_agent = Agent(
         name         = "Codeastra Document Analyst",
@@ -1501,133 +1496,6 @@ async def executor_classify_amount(req: Request):
         return {"bucket": label, "token": token, "real_value_returned": False}
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
-
-
-# ═══════════════════════════════════════════════════════════
-# VAULT-AS-TEE EMAIL SENDER
-# The correct architecture:
-#   Agent passes tokens only
-#   Vault opens ephemeral session
-#   Real values loaded inside — encrypted
-#   Email fires from inside vault
-#   Session wiped — data gone
-#   Agent never knew any real value
-# ═══════════════════════════════════════════════════════════
-
-async def tee_send_email(email_token: str, subject: str, body: str) -> dict:
-    """
-    Send email using the Vault-as-TEE architecture.
-
-    Flow:
-      1. Collect all tokens (email + any tokens in body)
-      2. Call app.codeastra.dev/tee/run — vault opens session
-      3. Vault resolves all tokens internally
-      4. Vault sends email via Resend from inside session
-      5. Session wiped — real values gone forever
-      6. Only result returned — sent: true/false
-
-    Agent never sees real email address or real names.
-    """
-    import re as _re
-
-    # Find all tokens in the body
-    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9]{6,}\]')
-    body_tokens   = list(set(token_pattern.findall(body)))
-    all_tokens    = list(set([email_token] + body_tokens))
-
-    log.info(f"[TEE EMAIL] Starting vault session — {len(all_tokens)} tokens to resolve")
-
-    # Step 1 — Call app.codeastra.dev/tee/run
-    # Vault opens, resolves tokens, sends email, wipes session
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            r = await c.post(
-                f"{CODEASTRA_URL}/tee/run",
-                headers={
-                    "X-API-Key":    CODEASTRA_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "agent_id":   "email-executor",
-                    "task":       f"send email: {subject}",
-                    "tokens":     {t: t for t in all_tokens},  # vault resolves internally
-                    "operations": [
-                        {
-                            "op":    "send_email_resend",
-                            "label": "send_email",
-                            "email_token":  email_token,
-                            "subject":      subject,
-                            "body":         body,
-                            "body_tokens":  body_tokens,
-                            "resend_key":   RESEND_KEY,
-                            "from_email":   FROM_EMAIL,
-                            "from_name":    FROM_NAME,
-                        }
-                    ],
-                },
-            )
-
-            if r.status_code == 200:
-                data    = r.json()
-                results = data.get("results", [])
-                log.info(f"[TEE EMAIL] Vault session complete — wiped: {data.get('data_deleted')}")
-
-                # Check if email was sent inside vault
-                email_result = next((r for r in results if r.get("operation") == "send_email"), None)
-                sent = email_result and email_result.get("result", {}).get("sent", False)
-
-                return {
-                    "sent":                       sent,
-                    "vault_session_id":           data.get("session_id"),
-                    "data_deleted":               data.get("data_deleted", True),
-                    "agent_remembers":            data.get("agent_remembers", False),
-                    "real_address_seen_by_agent": False,
-                    "vault_as_tee":               True,
-                }
-            else:
-                log.warning(f"[TEE EMAIL] /tee/run returned {r.status_code} — falling back to direct resolve")
-                # Fallback: use direct vault/resolve if TEE not available
-                return await _tee_email_fallback(email_token, subject, body, body_tokens)
-
-    except Exception as e:
-        log.warning(f"[TEE EMAIL] TEE error: {e} — falling back to direct resolve")
-        return await _tee_email_fallback(email_token, subject, body, body_tokens)
-
-
-async def _tee_email_fallback(
-    email_token:  str,
-    subject:      str,
-    body:         str,
-    body_tokens:  list,
-) -> dict:
-    """
-    Fallback if /tee/run is not available.
-    Still uses Codeastra vault/resolve — still never exposes to agent.
-    """
-    log.info("[TEE EMAIL FALLBACK] Using vault/resolve directly")
-
-    # Resolve email address
-    real_email = await codeastra_resolve(email_token)
-    if not real_email:
-        return {"sent": False, "error": f"Could not resolve: {email_token}",
-                "real_address_seen_by_agent": False}
-
-    # Resolve all body tokens
-    revealed_body = body
-    if body_tokens:
-        resolved = await codeastra_resolve_batch(body_tokens)
-        for token, real_value in resolved.items():
-            if real_value:
-                revealed_body = revealed_body.replace(token, str(real_value))
-
-    # Send via Resend
-    result = await _send_via_resend(real_email, subject, revealed_body)
-    return {
-        **result,
-        "real_address_seen_by_agent": False,
-        "vault_as_tee":               False,
-        "fallback":                   True,
-    }
 
 
 # ═══════════════════════════════════════════════════════════
