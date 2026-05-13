@@ -898,7 +898,20 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
         tools = [send_email],
     )
 
-    doc_input   = "TASK: " + (task or "Analyze this document thoroughly.") + \
+    # ── Protect the task prompt too — email in prompt must be tokenized ──
+    # This is the fix: task text goes through Astra before GPT sees it
+    task_events = []
+    protected_task = await protect(task or "Analyze this document thoroughly.", task_events, codeastra_active)
+
+    # Collect any tokens from the task prompt
+    for ev in task_events:
+        if ev["type"] == "intercepted":
+            dt.add_interception(ev["dtype"], ev["token"], ev["preview"])
+            s = dt.add_step("codeastra_intercept_task", ev)
+            yield {**ev, "trace_id": dt.id, "trace_step": s["step"],
+                   "source": "task_prompt"}
+
+    doc_input   = "TASK: " + protected_task + \
                   "\n\nDOCUMENT (" + filename + "):\n\n" + protected_text
     dt_trace_id = gen_trace_id()
 
