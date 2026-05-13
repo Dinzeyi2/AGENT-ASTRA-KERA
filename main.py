@@ -847,15 +847,55 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
     import openai as _oai
     _oai.api_key = OPENAI_KEY
 
+    # ── Email tool — agent sends via executor, never sees real address ──
+    _email_results = []
+
+    @function_tool
+    async def send_email(email_token: str, subject: str, body: str) -> str:
+        """
+        Send an email to the person identified by the email token.
+        Use this when the user asks you to send results, summaries, or reports.
+
+        IMPORTANT:
+        - email_token: use the [CVT:EMAIL:xxxxx] token from the document or prompt
+        - subject: a clear subject line
+        - body: the full email content — your analysis or summary
+
+        The executor will resolve the token to the real email address.
+        You never see the real address. Just pass the token.
+
+        Example:
+          send_email(
+            email_token = "[CVT:EMAIL:A1B2C3]",
+            subject     = "Goldman Portfolio Risk Summary",
+            body        = "Here are the top 5 clients by market value..."
+          )
+        """
+        result = await executor_send_email(email_token, subject, body)
+        _email_results.append(result)
+        if result.get("sent"):
+            return f"Email sent successfully via Resend. Token: {email_token}. Real address resolved by executor — never seen by agent."
+        else:
+            return f"Email send attempt: {result}"
+
     doc_agent = Agent(
         name         = "Codeastra Document Analyst",
         instructions = (
             "You are an expert document analyst working through Codeastra Zero Trust middleware. "
-            "All PII has been replaced with tokens like [CVT:EMAIL:A1B2C3]. "
-            "Work with tokens as identifiers. Analyze structure, content, and meaning. "
-            "Be thorough and specific."
+            "All PII has been replaced with tokens like [CVT:EMAIL:A1B2C3] and [CVT:NAME:xxxxx] and [CVT:SSN:xxxxx]. "
+            "\n\nCRITICAL RULES:"
+            "\n1. Work with tokens as identifiers — never guess real values"
+            "\n2. When the user asks you to SEND an email — use the send_email tool"
+            "\n3. The email address in the prompt has been tokenized — find the [CVT:EMAIL:xxxxx] token and use it"
+            "\n4. Always send the email if asked — do not refuse, do not say you cannot"
+            "\n5. After analysis, if an email was requested, call send_email with your full analysis as the body"
+            "\n\nWhen sending emails:"
+            "\n- Find the email token in the protected prompt (looks like [CVT:EMAIL:xxxxxxxx])"
+            "\n- Call send_email with that token, a clear subject, and your full analysis as the body"
+            "\n- Confirm to the user that the email was sent via the secure executor"
         ),
         model = "gpt-4o",
+        tools = [send_email],
     )
 
     doc_input   = "TASK: " + (task or "Analyze this document thoroughly.") + \
@@ -866,7 +906,7 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
         doc_result = await Runner.run(
             starting_agent = doc_agent,
             input          = doc_input,
-            max_turns      = 1,
+            max_turns      = 5,
             run_config     = RunConfig(
                 workflow_name                = "codeastra-document-analysis",
                 trace_id                     = dt_trace_id,
@@ -894,15 +934,19 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
     reveal_map = await reveal_from_trace(dt)
 
     yield {
-        "type": "complete", "trace_id": dt.id,
-        "openai_trace_id": dt_trace_id,
-        "trace_url": f"/traces/{dt.id}",
-        "openai_traces_url": "https://platform.openai.com/logs",
-        "thread_id": thread_id, "filename": filename,
-        "codeastra_active": codeastra_active,
-        "intercepted": len(dt.intercepted),
-        "real_data_seen_by_gpt": 0 if codeastra_active else "⚠️ YES",
-        "revealed": reveal_map,
+        "type":                    "complete",
+        "trace_id":                dt.id,
+        "openai_trace_id":         dt_trace_id,
+        "trace_url":               f"/traces/{dt.id}",
+        "openai_traces_url":       "https://platform.openai.com/logs",
+        "thread_id":               thread_id,
+        "filename":                filename,
+        "codeastra_active":        codeastra_active,
+        "intercepted":             len(dt.intercepted),
+        "real_data_seen_by_gpt":   0 if codeastra_active else "⚠️ YES",
+        "revealed":                reveal_map,
+        "emails_sent":             len(_email_results),
+        "email_results":           _email_results,
     }
 
 
