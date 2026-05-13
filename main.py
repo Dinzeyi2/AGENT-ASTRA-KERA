@@ -1499,15 +1499,6 @@ async def executor_classify_amount(req: Request):
 
 
 # ═══════════════════════════════════════════════════════════
-# RUN
-# ═══════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
-
-
-# ═══════════════════════════════════════════════════════════
 # EMAIL EXECUTOR
 # Agent says: "send to [CVT:EMAIL:A1B2]"
 # Executor resolves token → real address → sends email
@@ -1559,7 +1550,9 @@ async def _send_via_sendgrid(to_email: str, subject: str, body: str) -> dict:
 async def _send_via_resend(to_email: str, subject: str, body: str) -> dict:
     """Send email via Resend API."""
     if not RESEND_KEY:
-        return {"error": "RESEND_API_KEY not set"}
+        log.error("RESEND: RESEND_API_KEY not set in environment variables")
+        return {"error": "RESEND_API_KEY not set — add it to Railway environment variables"}
+    log.info(f"RESEND: sending to masked address, from={FROM_EMAIL}, subject={subject[:50]}")
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
             r = await c.post(
@@ -1576,8 +1569,14 @@ async def _send_via_resend(to_email: str, subject: str, body: str) -> dict:
                 },
             )
             data = r.json()
-            return {"sent": r.status_code == 200, "id": data.get("id"), "status": r.status_code}
+            if r.status_code == 200:
+                log.info(f"RESEND: ✅ email sent — id={data.get('id')}")
+                return {"sent": True, "id": data.get("id"), "status": 200}
+            else:
+                log.error(f"RESEND: ❌ failed status={r.status_code} body={r.text[:200]}")
+                return {"sent": False, "error": data, "status": r.status_code}
     except Exception as e:
+        log.error(f"RESEND: exception — {e}")
         return {"error": str(e)}
 
 
@@ -1609,51 +1608,59 @@ async def executor_send_email(
     """
     THE CORE FUNCTION.
 
-    Agent passes an email token.
-    Executor resolves it to the real address internally.
-    Sends the email.
-    Returns only: sent=true/false.
-    Agent never sees the real address.
-
-    Args:
-        email_token: [CVT:EMAIL:A1B2] — never the real address
-        subject:     Email subject line
-        body:        Email body — the agent's analysis/summary
-
-    Returns:
-        {"sent": true, "token": "[CVT:EMAIL:A1B2]", "real_address_seen_by_agent": false}
+    Agent passes an email token + body with tokens.
+    Executor resolves:
+      1. The email address token → real address
+      2. ALL tokens in the body  → real names, values
+    Sends the email with real values revealed.
+    Agent never sees any real values.
     """
-    # Step 1 — Resolve token to real email address
-    # This happens inside the executor only — never returned to agent
+    # Step 1 — Resolve email address token
     real_email = await codeastra_resolve(email_token)
 
     if not real_email:
         return {
-            "sent":    False,
-            "error":   f"Could not resolve token: {email_token}",
-            "token":   email_token,
+            "sent":  False,
+            "error": f"Could not resolve email token: {email_token}",
+            "token": email_token,
             "real_address_seen_by_agent": False,
         }
 
-    # Step 2 — Send via configured service
-    if EMAIL_SERVICE == "sendgrid" and SENDGRID_KEY:
-        result = await _send_via_sendgrid(real_email, subject, body)
-    elif EMAIL_SERVICE == "resend" and RESEND_KEY:
-        result = await _send_via_resend(real_email, subject, body)
-    elif SMTP_USER and SMTP_PASS:
-        result = await _send_via_smtp(real_email, subject, body)
-    else:
-        # Fallback — log that it would have sent
-        log.info(f"[EMAIL EXECUTOR] Would send to: {real_email} | Subject: {subject}")
-        result = {"sent": True, "mode": "log_only — set EMAIL_SERVICE env vars to send real emails"}
+    # Step 2 — Find ALL tokens in the body and resolve them
+    # The body contains [CVT:NAME:xxxx] tokens — replace with real names
+    import re as _re
+    token_pattern = _re.compile(r'\[CV[TD]:[A-Z]+:[A-F0-9]{6,}\]')
+    tokens_in_body = list(set(token_pattern.findall(body)))
 
-    # Step 3 — Return result WITHOUT the real address
+    revealed_body = body
+    if tokens_in_body:
+        # Batch resolve all tokens in body
+        resolved = await codeastra_resolve_batch(tokens_in_body)
+        # Replace tokens with real values in the body
+        for token, real_value in resolved.items():
+            if real_value:
+                revealed_body = revealed_body.replace(token, str(real_value))
+        log.info(f"[EMAIL EXECUTOR] Resolved {len(resolved)} tokens in email body")
+
+    # Step 3 — Send with real values in body
+    if EMAIL_SERVICE == "sendgrid" and SENDGRID_KEY:
+        result = await _send_via_sendgrid(real_email, subject, revealed_body)
+    elif EMAIL_SERVICE == "resend" and RESEND_KEY:
+        result = await _send_via_resend(real_email, subject, revealed_body)
+    elif SMTP_USER and SMTP_PASS:
+        result = await _send_via_smtp(real_email, subject, revealed_body)
+    else:
+        log.info(f"[EMAIL EXECUTOR] Would send to: {real_email} | Subject: {subject}")
+        result = {"sent": True, "mode": "log_only — set EMAIL_SERVICE env vars"}
+
+    # Step 4 — Return result WITHOUT real address or resolved values
     return {
         **result,
-        "token":                       email_token,
-        "real_address_seen_by_agent":  False,
-        "subject":                     subject,
-        "body_length":                 len(body),
+        "token":                      email_token,
+        "real_address_seen_by_agent": False,
+        "tokens_resolved_in_body":    len(tokens_in_body),
+        "subject":                    subject,
+        "body_length":                len(revealed_body),
     }
 
 
@@ -1751,3 +1758,14 @@ Powered by Codeastra — app.codeastra.dev
         "document_name": document_name,
         "report_sent":   result.get("sent", False),
     }
+
+
+
+
+# ═══════════════════════════════════════════════════════════
+# RUN
+# ═══════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
