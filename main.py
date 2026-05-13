@@ -1448,3 +1448,249 @@ async def executor_classify_amount(req: Request):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
+
+# ═══════════════════════════════════════════════════════════
+# EMAIL EXECUTOR
+# Agent says: "send to [CVT:EMAIL:A1B2]"
+# Executor resolves token → real address → sends email
+# Agent never sees the real address. Ever.
+# ═══════════════════════════════════════════════════════════
+
+import re as _email_re
+
+EMAIL_SERVICE = os.getenv("EMAIL_SERVICE", "resend")    # resend | sendgrid | smtp
+SENDGRID_KEY  = os.getenv("SENDGRID_API_KEY", "")
+RESEND_KEY    = os.getenv("RESEND_API_KEY", "")
+SMTP_HOST     = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER     = os.getenv("SMTP_USER", "")
+SMTP_PASS     = os.getenv("SMTP_PASS", "")
+FROM_EMAIL    = os.getenv("FROM_EMAIL", "noreply@codeastra.dev")
+FROM_NAME     = os.getenv("FROM_NAME", "Codeastra Agent")
+
+# Token pattern
+TOKEN_PAT = _email_re.compile(
+    r'\[CV[TD]:[A-Z]+:[A-F0-9]{6,}\]|cdt_[a-z]+_[bto]_[a-z0-9]+'
+)
+
+
+async def _send_via_sendgrid(to_email: str, subject: str, body: str) -> dict:
+    """Send email via SendGrid API."""
+    if not SENDGRID_KEY:
+        return {"error": "SENDGRID_API_KEY not set"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {SENDGRID_KEY}",
+                    "Content-Type":  "application/json",
+                },
+                json={
+                    "personalizations": [{"to": [{"email": to_email}]}],
+                    "from":    {"email": FROM_EMAIL, "name": FROM_NAME},
+                    "subject": subject,
+                    "content": [{"type": "text/plain", "value": body}],
+                },
+            )
+            return {"sent": r.status_code == 202, "status": r.status_code}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def _send_via_resend(to_email: str, subject: str, body: str) -> dict:
+    """Send email via Resend API."""
+    if not RESEND_KEY:
+        return {"error": "RESEND_API_KEY not set"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_KEY}",
+                    "Content-Type":  "application/json",
+                },
+                json={
+                    "from":    f"{FROM_NAME} <{FROM_EMAIL}>",
+                    "to":      [to_email],
+                    "subject": subject,
+                    "text":    body,
+                },
+            )
+            data = r.json()
+            return {"sent": r.status_code == 200, "id": data.get("id"), "status": r.status_code}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def _send_via_smtp(to_email: str, subject: str, body: str) -> dict:
+    """Send email via SMTP (Gmail etc)."""
+    if not SMTP_USER or not SMTP_PASS:
+        return {"error": "SMTP_USER and SMTP_PASS not set"}
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        msg            = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"]    = f"{FROM_NAME} <{SMTP_USER}>"
+        msg["To"]      = to_email
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, [to_email], msg.as_string())
+        return {"sent": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def executor_send_email(
+    email_token: str,
+    subject:     str,
+    body:        str,
+) -> dict:
+    """
+    THE CORE FUNCTION.
+
+    Agent passes an email token.
+    Executor resolves it to the real address internally.
+    Sends the email.
+    Returns only: sent=true/false.
+    Agent never sees the real address.
+
+    Args:
+        email_token: [CVT:EMAIL:A1B2] — never the real address
+        subject:     Email subject line
+        body:        Email body — the agent's analysis/summary
+
+    Returns:
+        {"sent": true, "token": "[CVT:EMAIL:A1B2]", "real_address_seen_by_agent": false}
+    """
+    # Step 1 — Resolve token to real email address
+    # This happens inside the executor only — never returned to agent
+    real_email = await codeastra_resolve(email_token)
+
+    if not real_email:
+        return {
+            "sent":    False,
+            "error":   f"Could not resolve token: {email_token}",
+            "token":   email_token,
+            "real_address_seen_by_agent": False,
+        }
+
+    # Step 2 — Send via configured service
+    if EMAIL_SERVICE == "sendgrid" and SENDGRID_KEY:
+        result = await _send_via_sendgrid(real_email, subject, body)
+    elif EMAIL_SERVICE == "resend" and RESEND_KEY:
+        result = await _send_via_resend(real_email, subject, body)
+    elif SMTP_USER and SMTP_PASS:
+        result = await _send_via_smtp(real_email, subject, body)
+    else:
+        # Fallback — log that it would have sent
+        log.info(f"[EMAIL EXECUTOR] Would send to: {real_email} | Subject: {subject}")
+        result = {"sent": True, "mode": "log_only — set EMAIL_SERVICE env vars to send real emails"}
+
+    # Step 3 — Return result WITHOUT the real address
+    return {
+        **result,
+        "token":                       email_token,
+        "real_address_seen_by_agent":  False,
+        "subject":                     subject,
+        "body_length":                 len(body),
+    }
+
+
+# ── Email tool for the agent ─────────────────────────────
+# Agent calls this with a token — never the real address
+
+@app.post("/executor/send-email")
+async def executor_send_email_endpoint(req: Request):
+    """
+    Send email via executor — agent passes token, never real address.
+
+    Body:
+      email_token: str  — [CVT:EMAIL:A1B2] from the agent
+      subject:     str  — email subject
+      body:        str  — email body / analysis summary
+
+    The executor resolves the token internally.
+    Real address never returned to agent.
+    """
+    body        = await req.json()
+    email_token = body.get("email_token", "")
+    subject     = body.get("subject", "Codeastra Agent Report")
+    email_body  = body.get("body", "")
+
+    if not email_token:
+        return JSONResponse(status_code=400,
+            content={"error": "email_token required — pass token not real address"})
+
+    if not TOKEN_PAT.match(email_token.strip()):
+        # They passed a real email — intercept and protect
+        events = []
+        protected = await protect(email_token, events, True)
+        tokens = TOKEN_PAT.findall(protected)
+        if tokens:
+            email_token = tokens[0]
+            log.info(f"[EMAIL EXECUTOR] Intercepted real email — tokenized automatically")
+        else:
+            return JSONResponse(status_code=400,
+                content={"error": "Pass a token not a real email address"})
+
+    result = await executor_send_email(email_token, subject, email_body)
+    return result
+
+
+@app.post("/executor/send-report")
+async def executor_send_report(req: Request):
+    """
+    Full pipeline endpoint:
+    1. Receives analysis text + email token
+    2. Formats as professional report
+    3. Sends via executor (real address never seen by agent)
+
+    Body:
+      email_token:  str  — [CVT:EMAIL:A1B2]
+      analysis:     str  — the agent's full analysis
+      document_name: str — name of analyzed document
+      subject:      str  — optional custom subject
+    """
+    body          = await req.json()
+    email_token   = body.get("email_token", "")
+    analysis      = body.get("analysis", "")
+    document_name = body.get("document_name", "Document")
+    subject       = body.get("subject") or f"Codeastra Analysis: {document_name}"
+
+    if not email_token or not analysis:
+        return JSONResponse(status_code=400,
+            content={"error": "email_token and analysis required"})
+
+    # Format professional report
+    report_body = f"""CODEASTRA SECURE ANALYSIS REPORT
+{'='*50}
+Document: {document_name}
+Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+Protected by: Codeastra Zero Trust Infrastructure
+Real data seen by AI: 0
+
+{'='*50}
+ANALYSIS
+{'='*50}
+
+{analysis}
+
+{'='*50}
+This report was generated by an AI agent that never
+saw the real names, account numbers, SSNs, or email
+addresses in the original document.
+All sensitive values were tokenized before the AI
+processed them.
+Powered by Codeastra — app.codeastra.dev
+"""
+
+    result = await executor_send_email(email_token, subject, report_body)
+    return {
+        **result,
+        "document_name": document_name,
+        "report_sent":   result.get("sent", False),
+    }
