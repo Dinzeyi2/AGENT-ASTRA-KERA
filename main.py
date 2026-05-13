@@ -941,6 +941,20 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
         return
 
     s = dt.add_step("analysis_complete", {"length": len(full)})
+
+    # ── Scan final output for any tokens Codeastra didn't report back ──
+    # Some tokens appear in agent output but were not in intercepted list
+    # Find them all and add to intercepted so reveal_from_trace catches them
+    import re as _scan_re
+    output_token_pat = _scan_re.compile(r'\[CV[TD]:[A-Z]+:[A-Za-z0-9\-]{4,}\]')
+    output_tokens = set(output_token_pat.findall(full))
+    known_tokens  = set(i["token"] for i in dt.intercepted)
+    missing = output_tokens - known_tokens
+    for tok in missing:
+        dt.add_interception("UNKNOWN", tok, tok[:20])
+    if missing:
+        log.info(f"[REVEAL] Found {len(missing)} extra tokens in output — added to reveal list")
+
     yield {"type": "thinking", "text": full, "trace_id": dt.id, "trace_step": s["step"]}
     dt.complete()
 
