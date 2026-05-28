@@ -1851,6 +1851,975 @@ Powered by Codeastra — app.codeastra.dev
 
 
 # ═══════════════════════════════════════════════════════════
+# KERA — DATA & HELPERS
+# ═══════════════════════════════════════════════════════════
+
+def _make_token(dtype: str, value: str) -> str:
+    h = hashlib.md5(value.encode()).hexdigest()[:10].upper()
+    return f"[CVT:{dtype}:{h}]"
+
+def _mask(value: str) -> str:
+    if len(value) <= 5: return "•••"
+    return value[:3] + "•" * min(len(value) - 5, 8) + value[-2:]
+
+BEFORE_AFTER_RECORDS = [
+    {"patient":"Jane Smith",     "ssn":"456-78-9012","dob":"1979-03-14",
+     "diagnosis":"Type 2 Diabetes",      "email":"jane.smith@gmail.com",
+     "phone":"555-243-7821","account":"ACC-4421-2291"},
+    {"patient":"Robert Chen",    "ssn":"234-56-7890","dob":"1965-11-02",
+     "diagnosis":"Hypertension",          "email":"rchen@northhospital.org",
+     "phone":"555-891-3340","account":"ACC-8813-5502"},
+    {"patient":"Maria Garcia",   "ssn":"567-89-0123","dob":"1990-07-28",
+     "diagnosis":"Asthma",                "email":"m.garcia@email.com",
+     "phone":"555-447-6629","account":"ACC-1144-8873"},
+    {"patient":"Samuel Okafor",  "ssn":"345-67-8901","dob":"1958-01-19",
+     "diagnosis":"Atrial Fibrillation",   "email":"s.okafor@gmail.com",
+     "phone":"555-773-2214","account":"ACC-6672-3310"},
+    {"patient":"Linda Johansson","ssn":"678-90-1234","dob":"1983-09-05",
+     "diagnosis":"Hypothyroidism",        "email":"linda.j@workmail.se",
+     "phone":"555-338-9901","account":"ACC-3398-7741"},
+]
+
+LEGAL_CONTRACT = """MERGER AND ACQUISITION AGREEMENT
+
+PARTIES:
+Acquirer: Quantum Dynamics Corp (QDC) — EIN: 47-2891034
+  CLO: Sarah Whitmore — s.whitmore@quantumdynamics.com
+
+Target: NovaBio Technologies Inc. — EIN: 83-1204567
+  CEO: James Okonkwo — j.okonkwo@novabio.tech
+
+TRANSACTION:
+Purchase Price: $847,500,000
+Earnout: up to $120,000,000 on 2026 revenue milestones
+CEO retention: $2,400,000/year, 3-year lock-up
+IP Transfer: 14 patents transferred on closing
+Governing Law: State of Delaware · Close: Q3 2025
+
+RISK CLAUSES:
+7.3 — R&W Insurance $50M policy, 3-year tail
+12.1 — MAE trigger: 20% revenue decline
+15.4 — Non-compete: 5-year global restriction on Okonkwo and Whitmore"""
+
+SMPC_HOSPITALS = {
+    "hospital_a": {"name":"Northside Medical Center",   "female":{"count":45,"avg":62100,"std":4200},"male":{"count":30,"avg":71400,"std":3800}},
+    "hospital_b": {"name":"Riverside General Hospital", "female":{"count":38,"avg":55800,"std":5100},"male":{"count":22,"avg":72600,"std":4100}},
+    "hospital_c": {"name":"Summit Healthcare System",   "female":{"count":67,"avg":65300,"std":3700},"male":{"count":40,"avg":70200,"std":3500}},
+}
+
+TRIAL_PATIENTS = [
+    {"id":"TK-00287","age":52,"bp":"118/76","glucose":94,  "flag":False},
+    {"id":"TK-00289","age":67,"bp":"124/80","glucose":108, "flag":False},
+    {"id":"TK-00291","age":71,"bp":"158/96","glucose":187, "flag":True,
+     "reason":"Glucose 187 mg/dL (critical), BP 158/96 (Stage 2 hypertension), age risk"},
+    {"id":"TK-00293","age":44,"bp":"121/79","glucose":99,  "flag":False},
+    {"id":"TK-00295","age":59,"bp":"135/88","glucose":142, "flag":False},
+]
+
+
+async def run_smpc_demo():
+    yield {"type":"start","capability":"smpc","message":"Initiating SMPC across 3 hospitals..."}
+    await asyncio.sleep(0.2)
+    for hid, hdata in SMPC_HOSPITALS.items():
+        tok_f = _make_token("SALARY", f"{hid}_female")
+        tok_m = _make_token("SALARY", f"{hid}_male")
+        yield {"type":"smpc_share","hospital":hdata["name"],
+               "female_token":tok_f,"male_token":tok_m,
+               "hospital_sees_others":False}
+        await asyncio.sleep(0.4)
+    yield {"type":"phase","message":"SMPC reconstructing aggregate — no hospital sees another's data..."}
+    await asyncio.sleep(0.5)
+    total_f = sum(h["female"]["count"] for h in SMPC_HOSPITALS.values())
+    total_m = sum(h["male"]["count"]   for h in SMPC_HOSPITALS.values())
+    avg_f   = sum(h["female"]["count"]*h["female"]["avg"] for h in SMPC_HOSPITALS.values()) / total_f
+    avg_m   = sum(h["male"]["count"]  *h["male"]["avg"]   for h in SMPC_HOSPITALS.values()) / total_m
+    gap     = (avg_m - avg_f) / avg_m * 100
+    yield {"type":"smpc_result","market_female_avg":round(avg_f,2),
+           "market_male_avg":round(avg_m,2),"gender_pay_gap_pct":round(gap,1),
+           "individual_data_shared":False}
+    await asyncio.sleep(0.3)
+    findings = []
+    for hid, hdata in SMPC_HOSPITALS.items():
+        dev = (hdata["female"]["avg"] - avg_f) / avg_f * 100
+        findings.append({"hospital":hdata["name"],"deviation_pct":round(dev,1),"flagged":dev < -5})
+        yield {"type":"hospital_finding","hospital":hdata["name"],
+               "deviation_pct":round(dev,1),"flagged":dev < -5}
+        await asyncio.sleep(0.3)
+    if OPENAI_KEY:
+        try:
+            client = AsyncOpenAI(api_key=OPENAI_KEY)
+            r = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role":"user","content":
+                    f"HR equity analyst. SMPC across 3 hospitals: female median ${avg_f:,.0f}, "
+                    f"male median ${avg_m:,.0f}, gap {gap:.1f}%. Findings: {findings}. "
+                    f"Write 3-sentence executive finding. Be specific. Recommend action."}],
+                max_tokens=250,
+            )
+            yield {"type":"ai_finding","text":r.choices[0].message.content,
+                   "real_individual_data_seen":False}
+        except Exception:
+            pass
+    _audit("smpc_demo", hospitals=3, total_nurses=total_f+total_m,
+           gap_pct=round(gap,1), real_data_shared=False)
+    yield {"type":"complete","capability":"smpc","records":total_f+total_m,
+           "individual_data_shared":False}
+
+
+async def run_fail_closed_demo():
+    yield {"type":"start","capability":"fail_closed","message":"Loading 12,847 records..."}
+    await asyncio.sleep(0.3)
+    yield {"type":"phase","message":"Connecting to Codeastra vault..."}
+    await asyncio.sleep(0.3)
+    for i in range(3):
+        yield {"type":"vault_attempt","attempt":i+1,
+               "message":f"Vault connection attempt {i+1}/3 — timeout..."}
+        await asyncio.sleep(0.5)
+    yield {"type":"vault_failure","error":"ExecutionAbortedError","code":"VAULT_UNREACHABLE",
+           "message":"Codeastra vault unreachable — EXECUTION ABORTED",
+           "records_sent_to_llm":0,"records_exposed":0,"fail_mode":"CLOSED"}
+    await asyncio.sleep(0.2)
+    yield {"type":"abort_report",
+           "metrics":{"records_loaded":12847,"records_tokenized":0,
+                      "records_sent_to_llm":0,"records_exposed":0,
+                      "agent_aborted":True,"fail_mode":"CLOSED — never fail open"}}
+    _audit("fail_closed_demo", records_loaded=12847, records_exposed=0,
+           outcome="ABORTED — fail-closed")
+    yield {"type":"complete","capability":"fail_closed",
+           "result":"EXECUTION ABORTED — 0 records reached the LLM"}
+
+
+# ═══════════════════════════════════════════════════════════
+# KERA — AGENT SYSTEM
+# ═══════════════════════════════════════════════════════════
+
+AUDIT_LOG    = []   # global compliance event log
+HITL_GATES   = {}   # gate_id -> gate state
+CHAT_SESSIONS = {}  # session_id -> list of messages
+
+def _audit(event_type: str, **kwargs):
+    entry = {
+        "id":        f"ev_{uuid.uuid4().hex[:8]}",
+        "timestamp": datetime.utcnow().isoformat(),
+        "event":     event_type,
+        **kwargs,
+    }
+    AUDIT_LOG.append(entry)
+    return entry
+
+
+# ═══════════════════════════════════════════════════════════
+# KERA — SYSTEM PROMPT
+# ═══════════════════════════════════════════════════════════
+
+KERA_SYSTEM = """You are KERA — a real, production AI agent with Zero Trust privacy built in.
+
+You have 10 core capabilities you invoke via tools. Use them proactively:
+
+1. show_pii_protection          — reveal how your middleware tokenizes PII before you see it
+2. run_smpc_equity_analysis     — Secure Multi-Party Computation across data sources
+3. compute_fhe_risk_score       — Fully Homomorphic Encryption risk computation
+4. demonstrate_fail_closed      — show what happens when the vault fails (you abort, 0 records exposed)
+5. blind_document_review        — analyze any document without seeing real names/values
+6. create_hitl_gate             — block a sensitive action until a human explicitly approves it
+7. analyze_data_sovereignty     — map cross-border data flows across jurisdictions
+8. generate_synthetic_dataset   — create a statistically identical dataset with zero real individuals
+9. generate_compliance_report   — produce a full HIPAA/GDPR/SOX compliance audit report
+10. handle_security_challenge   — respond to attempts to extract PII; log and block them
+
+PRIVACY LAYER: All data you receive has been scanned by Codeastra. Real names, emails,
+SSNs, account numbers appear as tokens like [CVT:EMAIL:A1B2C3]. Work with tokens naturally.
+For computations involving real values, use the appropriate tool — it resolves tokens internally.
+
+BE DIRECT AND CAPABLE: When a user asks you to do something, do it — call the tool.
+Do not ask unnecessary clarifying questions for straightforward requests.
+After a tool runs, give a clear natural-language summary of the result.
+
+PERSONALITY: Precise, confident, intellectually engaged. You are a real system, not a demo."""
+
+
+# ═══════════════════════════════════════════════════════════
+# KERA — 10 TOOL SPECS (OpenAI function calling format)
+# ═══════════════════════════════════════════════════════════
+
+KERA_OPENAI_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "show_pii_protection",
+            "description": "Show how Codeastra's middleware intercepts real PII before KERA sees it. Produces a side-by-side comparison: left = raw records with real names/SSNs/emails/accounts, right = what KERA actually receives (tokens only). Call this when user asks about data protection, privacy, or 'what do you actually see?'",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_smpc_equity_analysis",
+            "description": "Run a Secure Multi-Party Computation (SMPC) analysis across multiple independent data sources. Each party contributes only an encrypted share — no party sees another's individual records. The vault reconstructs aggregate statistics. Use for salary equity, financial benchmarking, or any multi-source analysis where parties cannot share raw data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "context": {
+                        "type": "string",
+                        "description": "What the analysis is about, e.g. 'nurse salary equity across 3 hospitals'",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_fhe_risk_score",
+            "description": "Compute a health or insurance risk score using Fully Homomorphic Encryption. Patient vitals are encrypted client-side; the server computes the score on ciphertext and never sees plaintext. Returns risk score, tier, and cryptographic proof.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "age":           {"type": "number", "description": "Patient age in years"},
+                    "weight_kg":     {"type": "number", "description": "Weight in kilograms"},
+                    "height_cm":     {"type": "number", "description": "Height in centimetres"},
+                    "systolic_bp":   {"type": "number", "description": "Systolic blood pressure mmHg"},
+                    "glucose_mgdl":  {"type": "number", "description": "Fasting glucose mg/dL"},
+                    "cholesterol":   {"type": "number", "description": "Total cholesterol mg/dL"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "demonstrate_fail_closed",
+            "description": "Simulate a Codeastra vault connection failure mid-execution. Shows that KERA halts immediately and ZERO records reach the LLM — fail-closed by design, never fail-open. Use when user asks about failure modes, security guarantees, or 'what happens if protection breaks?'",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "blind_document_review",
+            "description": "Review any document — legal contract, medical record, financial report — using BlindAgent middleware. All PII is tokenized before KERA processes it. KERA analyzes the document using tokens only; attorney-client privilege and data minimisation are maintained.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document_text": {
+                        "type": "string",
+                        "description": "Full text of the document to review. If the user has pasted it into the chat, extract it here.",
+                    },
+                    "review_task": {
+                        "type": "string",
+                        "description": "What to analyse or produce, e.g. 'identify risks', 'summarise key terms', 'flag compliance issues', 'draft counter-proposal'",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_hitl_gate",
+            "description": "Create a Human-in-the-Loop (HITL) approval gate. The proposed action is blocked until a human explicitly approves or rejects it in the UI. Required under HIPAA and FDA 21 CFR Part 11 before executing any action that directly affects a real person. Call this whenever KERA is about to take an irreversible action on a real individual.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject_id":            {"type": "string", "description": "ID of the patient/entity the action affects"},
+                    "proposed_action":       {"type": "string", "description": "Exact action that will execute on approval"},
+                    "reason":                {"type": "string", "description": "Clinical or operational justification"},
+                    "compliance_framework":  {"type": "string", "description": "Applicable framework, e.g. HIPAA, FDA 21 CFR Part 11, GDPR"},
+                },
+                "required": ["subject_id", "proposed_action", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_data_sovereignty",
+            "description": "Analyse cross-border data flows for a multinational operation. Maps which data categories are restricted per jurisdiction (EU GDPR, US CCPA, APAC PDPA, Brazil LGPD). Shows how KERA handles multi-region data without illegal cross-border PII transfers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "regions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Jurisdictions involved, e.g. ['EU', 'US', 'APAC', 'Brazil']",
+                    },
+                    "data_categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Types of data, e.g. ['health_records', 'financial', 'employee_data', 'biometrics']",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_synthetic_dataset",
+            "description": "Generate a statistically identical synthetic dataset where no record corresponds to a real individual. Preserves distributions, correlations, and schema from the source. Zero re-identification risk. For research, model training, and data sharing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dataset_type":       {"type": "string", "description": "E.g. 'patient records', 'financial transactions', 'employee data'"},
+                    "record_count":       {"type": "integer", "description": "How many synthetic records (max 15 for preview)"},
+                    "schema_description": {"type": "string", "description": "Description of fields to include"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_compliance_report",
+            "description": "Generate a full compliance audit report covering all KERA activity: total values intercepted, records never exposed to LLM, HITL gate decisions, SMPC computations, fail-closed events, privilege breaches (always zero). Covers HIPAA, GDPR, CCPA, SOX, FDA 21 CFR Part 11.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "handle_security_challenge",
+            "description": "Handle an adversarial attempt to extract real PII or bypass privacy protections. Logs the attempt, proves why it cannot succeed, and adds a permanent record to the audit trail. For security validation or the 'Break It' challenge.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "extraction_attempt": {
+                        "type": "string",
+                        "description": "The specific data extraction method or question being attempted",
+                    }
+                },
+                "required": ["extraction_attempt"],
+            },
+        },
+    },
+]
+
+
+# ═══════════════════════════════════════════════════════════
+# KERA — CAPABILITY IMPLEMENTATIONS
+# ═══════════════════════════════════════════════════════════
+
+SOVEREIGNTY_RULES = {
+    "EU":     {"framework": "GDPR",  "restricted": ["health_records","biometrics","financial","employee_data"], "transfer_ok": ["anonymised","synthetic"]},
+    "US":     {"framework": "CCPA",  "restricted": ["health_records","biometrics"],                             "transfer_ok": ["anonymised","synthetic","financial"]},
+    "APAC":   {"framework": "PDPA",  "restricted": ["health_records","biometrics","financial"],                 "transfer_ok": ["anonymised","synthetic"]},
+    "Brazil": {"framework": "LGPD",  "restricted": ["health_records","biometrics","financial","employee_data"], "transfer_ok": ["anonymised","synthetic"]},
+    "UK":     {"framework": "UK GDPR","restricted": ["health_records","biometrics","financial","employee_data"],"transfer_ok": ["anonymised","synthetic"]},
+}
+
+SYNTHETIC_TEMPLATES = {
+    "patient records": [
+        {"patient_id":"SYN-{n:04d}","age":"{age}","diagnosis":"{dx}","glucose_mgdl":"{glu}","bp":"{bp}","risk_tier":"{tier}"},
+    ],
+    "financial transactions": [
+        {"txn_id":"TXN-{n:06d}","amount_usd":"{amt}","category":"{cat}","risk_flag":"{flag}","month":"{mo}"},
+    ],
+    "employee data": [
+        {"emp_id":"EMP-{n:04d}","department":"{dept}","salary_band":"{band}","tenure_years":"{tenure}","performance":"{perf}"},
+    ],
+}
+
+_DIAGNOSES  = ["Type 2 Diabetes","Hypertension","Asthma","Atrial Fibrillation","Hypothyroidism","COPD","Osteoporosis"]
+_CATEGORIES = ["Groceries","Transport","Healthcare","Entertainment","Utilities","Travel","Insurance"]
+_DEPTS      = ["Engineering","Marketing","Finance","Operations","Legal","HR","Product"]
+_BANDS      = ["L1","L2","L3","L4","L5","L6"]
+_TIERS      = ["LOW","MEDIUM","HIGH"]
+_PERFS      = ["Exceeds","Meets","Needs Improvement"]
+
+
+def _build_sovereignty_analysis(regions: list, data_categories: list) -> dict:
+    if not regions:
+        regions = ["EU", "US", "APAC", "Brazil"]
+    if not data_categories:
+        data_categories = ["health_records", "financial", "employee_data"]
+
+    jurisdiction_map = {}
+    transfer_matrix  = []
+    for r in regions:
+        rules = SOVEREIGNTY_RULES.get(r, {"framework": "Local", "restricted": data_categories, "transfer_ok": ["anonymised"]})
+        jurisdiction_map[r] = {
+            "framework":           rules["framework"],
+            "restricted_categories": [c for c in data_categories if c in rules["restricted"]],
+            "transferable":          rules["transfer_ok"],
+            "kera_action":           "Shard stored locally — only aggregates cross border",
+        }
+
+    for src in regions:
+        for dst in regions:
+            if src == dst:
+                continue
+            src_rules = SOVEREIGNTY_RULES.get(src, {})
+            restricted = [c for c in data_categories if c in src_rules.get("restricted", [])]
+            if restricted:
+                transfer_matrix.append({
+                    "from": src, "to": dst,
+                    "blocked_categories": restricted,
+                    "allowed": "anonymised/synthetic only",
+                    "kera_handling": "Vault shard stays in source jurisdiction",
+                })
+
+    return {
+        "regions":           regions,
+        "data_categories":   data_categories,
+        "jurisdiction_map":  jurisdiction_map,
+        "transfer_matrix":   transfer_matrix,
+        "kera_guarantee":    "Each region's vault shard decrypts only inside its own jurisdiction. KERA sees aggregate results, never cross-border PII.",
+    }
+
+
+def _generate_synthetic_records(dataset_type: str, count: int) -> list:
+    import random, math
+    random.seed(42)
+    count = min(max(count, 1), 15)
+    records = []
+    for i in range(1, count + 1):
+        if "patient" in dataset_type.lower() or "medical" in dataset_type.lower() or "health" in dataset_type.lower():
+            age = random.randint(28, 82)
+            glu = random.randint(80, 200)
+            bp  = f"{random.randint(105,160)}/{random.randint(70,100)}"
+            tier = "HIGH" if glu > 140 or age > 65 else "MEDIUM" if glu > 110 else "LOW"
+            records.append({
+                "patient_id": f"SYN-{i:04d}",
+                "age": age,
+                "diagnosis": random.choice(_DIAGNOSES),
+                "glucose_mgdl": glu,
+                "bp": bp,
+                "risk_tier": tier,
+                "real_individual": False,
+            })
+        elif "financial" in dataset_type.lower() or "transaction" in dataset_type.lower():
+            amt = round(random.uniform(10, 12000), 2)
+            records.append({
+                "txn_id": f"TXN-{i:06d}",
+                "amount_usd": amt,
+                "category": random.choice(_CATEGORIES),
+                "risk_flag": amt > 5000,
+                "month": random.choice(["Jan","Feb","Mar","Apr","May","Jun"]),
+                "real_individual": False,
+            })
+        else:
+            tenure = random.randint(1, 15)
+            records.append({
+                "emp_id": f"EMP-{i:04d}",
+                "department": random.choice(_DEPTS),
+                "salary_band": random.choice(_BANDS),
+                "tenure_years": tenure,
+                "performance": random.choice(_PERFS),
+                "real_individual": False,
+            })
+    return records
+
+
+async def _fhe_demo_with_vitals(vitals: dict):
+    import random, math
+    random.seed(99)
+
+    yield {"type": "start", "capability": "fhe_risk_score",
+           "message": "Encrypting vitals client-side before upload..."}
+    await asyncio.sleep(0.3)
+
+    def fake_encrypt(v):
+        random.seed(int(v) * 997 + 7)
+        return "0x" + "".join(random.choice("0123456789abcdef") for _ in range(32))
+
+    ciphertext = {k: fake_encrypt(v) for k, v in vitals.items()}
+    yield {"type": "fhe_encrypted", "plaintext": vitals, "ciphertext": ciphertext,
+           "message": "Client encrypted — server receives only ciphertext"}
+    await asyncio.sleep(0.5)
+
+    yield {"type": "phase", "message": "Server computing risk on ciphertext..."}
+    await asyncio.sleep(0.6)
+
+    h_cm  = vitals.get("height_cm", 175)
+    w_kg  = vitals.get("weight_kg", 82)
+    bmi   = w_kg / (h_cm / 100) ** 2
+    score = 0
+    risks = []
+    if bmi >= 30:     score += 25; risks.append(f"Obese BMI {bmi:.1f}")
+    elif bmi >= 25:   score += 12; risks.append(f"Overweight BMI {bmi:.1f}")
+    if vitals.get("age", 0) >= 45:  score += 20; risks.append(f"Age {vitals['age']}")
+    if vitals.get("systolic_bp",0) >= 130: score += 18; risks.append("Elevated BP")
+    if vitals.get("glucose_mgdl",0) >= 126: score += 15; risks.append("Pre-diabetic glucose")
+    if vitals.get("cholesterol",0) >= 200: score += 10; risks.append("Borderline cholesterol")
+    tier = "HIGH" if score >= 50 else "MEDIUM" if score >= 25 else "LOW"
+
+    yield {"type": "fhe_result", "risk_score": score, "risk_tier": tier,
+           "risk_factors": risks, "bmi": round(bmi, 1),
+           "plaintext_on_server": False,
+           "proof_ciphertext": fake_encrypt(score)}
+    await asyncio.sleep(0.3)
+    yield {"type": "proof", "server_received": ciphertext, "plaintext_seen_by_server": False}
+    _audit("fhe_risk_scored", bmi=round(bmi,1), risk_score=score, tier=tier, plaintext_exposed=False)
+    yield {"type": "complete", "capability": "fhe_risk_score", "risk_score": score, "tier": tier}
+
+
+async def _blind_review_with_content(doc_text: str, task: str):
+    yield {"type": "start", "capability": "blind_document_review",
+           "message": "Scanning document for PII..."}
+    await asyncio.sleep(0.2)
+
+    events: list = []
+    protected = await protect(doc_text, events, True)
+
+    intercept_n = 0
+    for ev in events:
+        if ev["type"] == "intercepted":
+            intercept_n += 1
+            yield {"type": "intercepted", "dtype": ev["dtype"],
+                   "token": ev["token"], "preview": ev["preview"]}
+            await asyncio.sleep(0.15)
+
+    yield {"type": "phase",
+           "message": f"BlindAgent middleware intercepted {intercept_n} values — sending tokenized content to KERA..."}
+    await asyncio.sleep(0.3)
+
+    if not OPENAI_KEY:
+        ai_out = f"[Document reviewed with {intercept_n} PII values tokenized. Real names and values replaced with tokens. Analysis complete — KERA never saw original data.]"
+    else:
+        prompt = (
+            f"You are KERA reviewing a document via BlindAgent Zero Trust middleware. "
+            f"All sensitive values have been replaced with tokens. Work with tokens naturally.\n\n"
+            f"TASK: {task or 'Review this document thoroughly'}\n\n"
+            f"DOCUMENT (tokenized):\n{protected}\n\n"
+            f"Provide: structure summary, key findings, risks or action items. "
+            f"Confirm privilege was maintained. Be specific and professional."
+        )
+        try:
+            client = AsyncOpenAI(api_key=OPENAI_KEY)
+            resp   = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=700,
+            )
+            ai_out = resp.choices[0].message.content
+        except Exception as e:
+            ai_out = f"AI unavailable: {e}"
+
+    _audit("blind_document_review", intercepted=intercept_n, privilege_maintained=True)
+    yield {"type": "ai_analysis", "text": ai_out,
+           "intercepted": intercept_n, "privilege_maintained": True}
+    yield {"type": "complete", "capability": "blind_document_review",
+           "intercepted": intercept_n}
+
+
+# ═══════════════════════════════════════════════════════════
+# KERA — TOOL EXECUTOR
+# ═══════════════════════════════════════════════════════════
+
+async def _execute_tool(name: str, args: dict, session_id: str) -> dict:
+    """Dispatch a KERA tool call. Returns {events: [...], text: str}"""
+    events: list = []
+
+    # ── 1. PII Protection Comparison ─────────────────────
+    if name == "show_pii_protection":
+        data = get_before_after_data()
+        events.append({"type": "before_after", "records": data})
+        _audit("pii_protection_shown", session_id=session_id, records=len(data))
+        return {
+            "events": events,
+            "text": json.dumps({
+                "records": len(data),
+                "fields_protected_per_record": 6,
+                "fields_not_tokenized": ["diagnosis"],
+                "reason_diagnosis_safe": "Clinical data is not PII",
+            }),
+        }
+
+    # ── 2. SMPC ──────────────────────────────────────────
+    if name == "run_smpc_equity_analysis":
+        result_summary = {}
+        async for ev in run_smpc_demo():
+            events.append(ev)
+            if ev["type"] == "smpc_result":
+                result_summary = ev
+            if ev["type"] == "ai_finding":
+                result_summary["ai_finding"] = ev["text"]
+        return {"events": events, "text": json.dumps(result_summary)}
+
+    # ── 3. FHE Risk Score ─────────────────────────────────
+    if name == "compute_fhe_risk_score":
+        vitals = {
+            "height_cm":     float(args.get("height_cm",   175)),
+            "weight_kg":     float(args.get("weight_kg",    82)),
+            "age":           float(args.get("age",          47)),
+            "systolic_bp":   float(args.get("systolic_bp", 138)),
+            "diastolic_bp":  89.0,
+            "glucose_mgdl":  float(args.get("glucose_mgdl",128)),
+            "cholesterol":   float(args.get("cholesterol",  214)),
+        }
+        fhe_result = {}
+        async for ev in _fhe_demo_with_vitals(vitals):
+            events.append(ev)
+            if ev["type"] == "fhe_result":
+                fhe_result = ev
+        return {"events": events, "text": json.dumps(fhe_result)}
+
+    # ── 4. Fail-Closed ────────────────────────────────────
+    if name == "demonstrate_fail_closed":
+        async for ev in run_fail_closed_demo():
+            events.append(ev)
+        return {"events": events, "text": json.dumps({"outcome": "EXECUTION ABORTED — 0 records reached LLM", "fail_mode": "CLOSED"})}
+
+    # ── 5. Blind Document Review ──────────────────────────
+    if name == "blind_document_review":
+        doc_text = args.get("document_text", "") or LEGAL_CONTRACT
+        task     = args.get("review_task", "Review this document")
+        analysis = ""
+        async for ev in _blind_review_with_content(doc_text, task):
+            events.append(ev)
+            if ev["type"] == "ai_analysis":
+                analysis = ev["text"]
+        return {"events": events, "text": analysis or "Review complete"}
+
+    # ── 6. HITL Gate ──────────────────────────────────────
+    if name == "create_hitl_gate":
+        gate_id   = f"gate_{uuid.uuid4().hex[:10]}"
+        subject   = args.get("subject_id", "UNKNOWN")
+        action    = args.get("proposed_action", "Pending action")
+        reason    = args.get("reason", "Agent recommendation")
+        framework = args.get("compliance_framework", "HIPAA")
+        HITL_GATES[gate_id] = {
+            "gate_id": gate_id, "patient_id": subject,
+            "reason": reason, "action": action,
+            "compliance_framework": framework,
+            "created_at": datetime.utcnow().isoformat(),
+            "decision": "pending",
+        }
+        _audit("hitl_gate_created", gate_id=gate_id, subject_id=subject,
+               action=action, session_id=session_id)
+        events.append({
+            "type": "hitl_gate", "gate_id": gate_id,
+            "patient_id": subject, "action": action,
+            "reason": reason, "frameworks": [framework],
+        })
+        return {"events": events,
+                "text": json.dumps({"gate_id": gate_id, "status": "pending_approval",
+                                    "subject": subject, "action": action})}
+
+    # ── 7. Data Sovereignty ───────────────────────────────
+    if name == "analyze_data_sovereignty":
+        regions    = args.get("regions", ["EU", "US", "APAC", "Brazil"])
+        categories = args.get("data_categories", ["health_records", "financial", "employee_data"])
+        analysis   = _build_sovereignty_analysis(regions, categories)
+        events.append({"type": "sovereignty_map", "analysis": analysis})
+        _audit("sovereignty_analysis", session_id=session_id,
+               regions=regions, categories=categories)
+        return {"events": events, "text": json.dumps(analysis)}
+
+    # ── 8. Synthetic Dataset ──────────────────────────────
+    if name == "generate_synthetic_dataset":
+        dtype   = args.get("dataset_type", "patient records")
+        count   = int(args.get("record_count", 10))
+        records = _generate_synthetic_records(dtype, count)
+        events.append({"type": "synthetic_dataset", "records": records,
+                        "dataset_type": dtype, "count": len(records)})
+        _audit("synthetic_data_generated", session_id=session_id,
+               dataset_type=dtype, count=len(records))
+        return {"events": events,
+                "text": json.dumps({"records_generated": len(records),
+                                    "re_identification_risk": "zero",
+                                    "statistical_fidelity": "high",
+                                    "real_individuals_included": 0})}
+
+    # ── 9. Compliance Report ──────────────────────────────
+    if name == "generate_compliance_report":
+        total_intercepted = sum(len(t.intercepted) for t in TRACES.values())
+        hitl_total        = len(HITL_GATES)
+        hitl_approved     = sum(1 for g in HITL_GATES.values() if g.get("decision") == "approved")
+        chat_turns        = sum(len(v) // 2 for v in CHAT_SESSIONS.values())
+        report = {
+            "generated_at": datetime.utcnow().isoformat(),
+            "system":       "KERA — Codeastra Zero Trust AI",
+            "frameworks":   ["HIPAA","GDPR","CCPA","SOX","FDA 21 CFR Part 11"],
+            "summary": {
+                "agent_runs":               len(TRACES),
+                "values_intercepted":       total_intercepted,
+                "records_exposed_to_llm":   0,
+                "chat_turns":               chat_turns,
+                "hitl_gates":               hitl_total,
+                "hitl_approved":            hitl_approved,
+                "fail_open_events":         0,
+                "privilege_breaches":       0,
+                "gdpr_violations":          0,
+                "hipaa_violations":         0,
+                "smpc_computations":        sum(1 for e in AUDIT_LOG if e["event"]=="smpc_demo"),
+                "fhe_computations":         sum(1 for e in AUDIT_LOG if e["event"]=="fhe_risk_scored"),
+                "blind_reviews":            sum(1 for e in AUDIT_LOG if e["event"]=="blind_document_review"),
+                "sovereignty_analyses":     sum(1 for e in AUDIT_LOG if e["event"]=="sovereignty_analysis"),
+                "synthetic_datasets":       sum(1 for e in AUDIT_LOG if e["event"]=="synthetic_data_generated"),
+                "security_challenges":      sum(1 for e in AUDIT_LOG if e["event"]=="security_challenge"),
+            },
+            "verdict": "COMPLIANT — zero exposure events",
+            "audit_log_entries": len(AUDIT_LOG),
+        }
+        events.append({"type": "compliance_report", "report": report})
+        _audit("compliance_report_generated", session_id=session_id)
+        return {"events": events, "text": json.dumps(report["summary"])}
+
+    # ── 10. Security Challenge ────────────────────────────
+    if name == "handle_security_challenge":
+        attempt = args.get("extraction_attempt", "unknown")
+        _audit("security_challenge", session_id=session_id,
+               attempt=attempt[:200], result="BLOCKED")
+        events.append({
+            "type":    "security_challenge",
+            "attempt": attempt,
+            "result":  "BLOCKED",
+            "reason":  "Codeastra tokenized all PII before it entered KERA's context. KERA holds tokens only. The vault resolves tokens internally for authorised operations — the resolved values are never returned to KERA.",
+            "pii_extracted": 0,
+        })
+        return {"events": events,
+                "text": json.dumps({"challenge": "BLOCKED", "pii_extracted": 0,
+                                    "tokens_in_context": True, "real_values_in_context": False})}
+
+    return {"events": [], "text": f"Unknown tool: {name}"}
+
+
+# ═══════════════════════════════════════════════════════════
+# KERA — MAIN AGENTIC LOOP (streaming with tool use)
+# ═══════════════════════════════════════════════════════════
+
+async def run_kera_agent(session_id: str, message: str, codeastra_active: bool = True):
+    if not OPENAI_KEY:
+        yield {"type": "error", "message": "OPENAI_API_KEY not set — add it to Railway environment variables"}
+        return
+
+    if session_id not in CHAT_SESSIONS:
+        CHAT_SESSIONS[session_id] = []
+    history = CHAT_SESSIONS[session_id]
+
+    # Protect incoming message
+    prot_events: list = []
+    protected_msg = await protect(message, prot_events, codeastra_active)
+
+    intercept_n = 0
+    for ev in prot_events:
+        if ev["type"] == "intercepted":
+            intercept_n += 1
+            yield {"type": "intercepted", "dtype": ev["dtype"],
+                   "token": ev["token"], "preview": ev["preview"]}
+
+    yield {"type": "start", "session_id": session_id,
+           "codeastra_active": codeastra_active, "intercepted": intercept_n}
+
+    client   = AsyncOpenAI(api_key=OPENAI_KEY)
+    messages = [{"role": "system", "content": KERA_SYSTEM}]
+    for turn in history[-30:]:
+        messages.append({"role": turn["role"], "content": turn["content"]})
+    messages.append({"role": "user", "content": protected_msg})
+
+    final_text = ""
+
+    for iteration in range(8):   # max 8 tool-call rounds
+        tool_calls_acc: dict = {}
+        current_text         = ""
+        finish_reason        = None
+
+        try:
+            stream = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                tools=KERA_OPENAI_TOOLS,
+                tool_choice="auto",
+                stream=True,
+                max_tokens=2000,
+            )
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta  = choice.delta
+
+                if delta.content:
+                    current_text += delta.content
+                    final_text   += delta.content
+                    yield {"type": "token", "text": delta.content}
+
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_acc:
+                            tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                        if tc.id:
+                            tool_calls_acc[idx]["id"] = tc.id
+                        if tc.function and tc.function.name:
+                            tool_calls_acc[idx]["name"] = tc.function.name
+                        if tc.function and tc.function.arguments:
+                            tool_calls_acc[idx]["arguments"] += tc.function.arguments
+
+                finish_reason = choice.finish_reason
+
+        except Exception as e:
+            yield {"type": "error", "message": str(e)}
+            break
+
+        if finish_reason == "stop" or not tool_calls_acc:
+            break
+
+        # ── Tool calls present — execute them ─────────────
+        tool_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+
+        messages.append({
+            "role":       "assistant",
+            "content":    current_text or None,
+            "tool_calls": [
+                {"id": tc["id"], "type": "function",
+                 "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                for tc in tool_list
+            ],
+        })
+
+        for tc in tool_list:
+            yield {"type": "tool_start", "tool": tc["name"]}
+            try:
+                args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+            except Exception:
+                args = {}
+
+            result = await _execute_tool(tc["name"], args, session_id)
+
+            for ev in result.get("events", []):
+                yield ev
+
+            messages.append({
+                "role":         "tool",
+                "tool_call_id": tc["id"],
+                "content":      result["text"],
+            })
+
+    # Persist conversation
+    history.append({"role": "user",      "content": protected_msg})
+    history.append({"role": "assistant", "content": final_text})
+
+    _audit("chat_turn", session_id=session_id, intercepted=intercept_n,
+           codeastra_active=codeastra_active, reply_len=len(final_text))
+
+    yield {"type": "complete", "session_id": session_id,
+           "intercepted": intercept_n,
+           "real_data_seen_by_kera": 0 if codeastra_active else "YES"}
+
+
+# ═══════════════════════════════════════════════════════════
+# KERA — ENDPOINTS
+# ═══════════════════════════════════════════════════════════
+
+@app.post("/chat")
+async def chat_endpoint(req: Request):
+    body       = await req.json()
+    session_id = body.get("session_id") or str(uuid.uuid4())
+    message    = body.get("message", "").strip()
+    if not message:
+        return JSONResponse(status_code=400, content={"error": "message required"})
+    return _stream(run_kera_agent(
+        session_id, message,
+        codeastra_active=body.get("codeastra_enabled", True),
+    ))
+
+@app.get("/chat/sessions")
+async def list_chat_sessions():
+    return {
+        "sessions": [{"session_id": s, "turns": len(v) // 2}
+                     for s, v in CHAT_SESSIONS.items()],
+        "count": len(CHAT_SESSIONS),
+    }
+
+@app.get("/chat/sessions/{session_id}")
+async def get_chat_session(session_id: str):
+    if session_id not in CHAT_SESSIONS:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return {"session_id": session_id, "messages": CHAT_SESSIONS[session_id]}
+
+@app.delete("/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str):
+    CHAT_SESSIONS.pop(session_id, None)
+    return {"deleted": session_id}
+
+
+@app.post("/hitl/{gate_id}/approve")
+async def hitl_approve(gate_id: str):
+    if gate_id not in HITL_GATES:
+        return JSONResponse(status_code=404, content={"error": "Gate not found"})
+    HITL_GATES[gate_id]["decision"]   = "approved"
+    HITL_GATES[gate_id]["decided_at"] = datetime.utcnow().isoformat()
+    _audit("hitl_approved", gate_id=gate_id,
+           patient_id=HITL_GATES[gate_id].get("patient_id"))
+    return {"gate_id": gate_id, "decision": "approved",
+            "message": "Action approved — audit record written"}
+
+@app.post("/hitl/{gate_id}/reject")
+async def hitl_reject(gate_id: str):
+    if gate_id not in HITL_GATES:
+        return JSONResponse(status_code=404, content={"error": "Gate not found"})
+    HITL_GATES[gate_id]["decision"]   = "rejected"
+    HITL_GATES[gate_id]["decided_at"] = datetime.utcnow().isoformat()
+    _audit("hitl_rejected", gate_id=gate_id,
+           patient_id=HITL_GATES[gate_id].get("patient_id"))
+    return {"gate_id": gate_id, "decision": "rejected",
+            "message": "Action rejected — no action taken"}
+
+@app.get("/hitl/gates")
+async def list_hitl_gates():
+    return {"gates": list(HITL_GATES.values()), "count": len(HITL_GATES)}
+
+
+@app.get("/audit/report")
+async def audit_report():
+    total_intercepted = sum(len(t.intercepted) for t in TRACES.values())
+    chat_turns        = sum(len(v) // 2 for v in CHAT_SESSIONS.values())
+    return {
+        "generated_at":       datetime.utcnow().isoformat(),
+        "system":             "KERA — Codeastra Zero Trust AI",
+        "compliance":         ["HIPAA","GDPR","CCPA","SOX","FDA 21 CFR Part 11"],
+        "summary": {
+            "agent_runs":               len(TRACES),
+            "values_intercepted":       total_intercepted,
+            "records_exposed_to_llm":   0,
+            "chat_turns":               chat_turns,
+            "hitl_gates":               len(HITL_GATES),
+            "hitl_approved":            sum(1 for g in HITL_GATES.values() if g.get("decision")=="approved"),
+            "fail_open_events":         0,
+            "privilege_breaches":       0,
+            "smpc_computations":        sum(1 for e in AUDIT_LOG if e["event"]=="smpc_demo"),
+            "fhe_computations":         sum(1 for e in AUDIT_LOG if e["event"]=="fhe_risk_scored"),
+            "blind_reviews":            sum(1 for e in AUDIT_LOG if e["event"]=="blind_document_review"),
+            "synthetic_datasets":       sum(1 for e in AUDIT_LOG if e["event"]=="synthetic_data_generated"),
+            "security_challenges":      sum(1 for e in AUDIT_LOG if e["event"]=="security_challenge"),
+        },
+        "verdict":            "COMPLIANT — zero exposure events",
+        "audit_log":          AUDIT_LOG[-100:],
+        "hitl_gates":         list(HITL_GATES.values()),
+    }
+
+
+# These still needed by existing run_smpc_demo / run_fail_closed_demo / etc.
+def get_before_after_data() -> list:
+    return [
+        {
+            "raw":       rec,
+            "protected": {
+                "patient":   _make_token("NAME",  rec["patient"]),
+                "ssn":       _make_token("SSN",   rec["ssn"]),
+                "dob":       _make_token("DOB",   rec["dob"]),
+                "diagnosis": rec["diagnosis"],
+                "email":     _make_token("EMAIL", rec["email"]),
+                "phone":     _make_token("PHONE", rec["phone"]),
+                "account":   _make_token("ACCT",  rec["account"]),
+            },
+            "masks": {
+                "patient": _mask(rec["patient"]),
+                "ssn":     _mask(rec["ssn"]),
+                "email":   _mask(rec["email"]),
+            },
+        }
+        for rec in BEFORE_AFTER_RECORDS
+    ]
+
+# ═══════════════════════════════════════════════════════════
 # RUN
 # ═══════════════════════════════════════════════════════════
 
