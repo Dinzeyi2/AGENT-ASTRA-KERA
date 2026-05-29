@@ -1053,14 +1053,20 @@ async def analyze_document(
     task:              str        = Form(default=""),
     codeastra_enabled: str        = Form(default="true"),
     thread_id:         str        = Form(default=""),
+    session_id:        str        = Form(default=""),
 ):
     if file is None:
         return JSONResponse(status_code=400, content={"error": "No file uploaded"})
-    text = await extract_text_from_file(file)
-    return _stream(run_document_agent(
-        text, task, file.filename or "document",
-        codeastra_active = codeastra_enabled.lower() != "false",
-        thread_id        = thread_id or None,
+    text       = await extract_text_from_file(file)
+    fname      = file.filename or "document"
+    active     = codeastra_enabled.lower() != "false"
+    sid        = session_id or thread_id or str(uuid.uuid4())
+    user_task  = task.strip() or "Analyze this document thoroughly and give me a detailed report."
+    return _stream(run_kera_agent(
+        sid, user_task,
+        codeastra_active = active,
+        document_text    = text,
+        filename         = fname,
     ))
 
 @app.post("/agent/analyze-url")
@@ -1070,10 +1076,13 @@ async def analyze_url(req: Request):
     if not url.startswith(("http://", "https://")):
         return JSONResponse(status_code=400, content={"error": "Valid URL required"})
     text = await extract_text_from_url(url)
-    return _stream(run_document_agent(
-        text, body.get("task", ""), url,
+    sid  = body.get("session_id") or body.get("thread_id") or str(uuid.uuid4())
+    return _stream(run_kera_agent(
+        sid,
+        body.get("task", "").strip() or "Analyze this page thoroughly.",
         codeastra_active = body.get("codeastra_enabled", True),
-        thread_id        = body.get("thread_id"),
+        document_text    = text,
+        filename         = url,
     ))
 
 @app.post("/agent/analyze-text")
@@ -1082,10 +1091,13 @@ async def analyze_text(req: Request):
     text = body.get("text", "").strip()
     if not text:
         return JSONResponse(status_code=400, content={"error": "text required"})
-    return _stream(run_document_agent(
-        text, body.get("task", ""), body.get("name", "text"),
+    sid  = body.get("session_id") or body.get("thread_id") or str(uuid.uuid4())
+    return _stream(run_kera_agent(
+        sid,
+        body.get("task", "").strip() or "Analyze this content thoroughly.",
         codeastra_active = body.get("codeastra_enabled", True),
-        thread_id        = body.get("thread_id"),
+        document_text    = text,
+        filename         = body.get("name", "text"),
     ))
 
 @app.post("/agent/analyze-multiple")
@@ -1094,6 +1106,7 @@ async def analyze_multiple(
     task:              str              = Form(default=""),
     codeastra_enabled: str              = Form(default="true"),
     thread_id:         str              = Form(default=""),
+    session_id:        str              = Form(default=""),
 ):
     if not files:
         return JSONResponse(status_code=400, content={"error": "No files"})
@@ -1104,10 +1117,14 @@ async def analyze_multiple(
         t = await extract_text_from_file(f)
         names.append(f.filename or "file")
         all_text += f"\n\n=== FILE: {f.filename} ===\n{t}"
-    return _stream(run_document_agent(
-        all_text, task, f"{len(files)} files: {', '.join(names)}",
-        codeastra_active = codeastra_enabled.lower() != "false",
-        thread_id        = thread_id or None,
+    sid    = session_id or thread_id or str(uuid.uuid4())
+    active = codeastra_enabled.lower() != "false"
+    return _stream(run_kera_agent(
+        sid,
+        task.strip() or "Analyze these documents thoroughly.",
+        codeastra_active = active,
+        document_text    = all_text,
+        filename         = f"{len(files)} files: {', '.join(names)}",
     ))
 
 
@@ -2750,7 +2767,13 @@ async def _execute_tool(name: str, args: dict, session_id: str) -> dict:
 # KERA — MAIN AGENTIC LOOP (streaming with tool use)
 # ═══════════════════════════════════════════════════════════
 
-async def run_kera_agent(session_id: str, message: str, codeastra_active: bool = True):
+async def run_kera_agent(
+    session_id: str,
+    message: str,
+    codeastra_active: bool = True,
+    document_text: str = "",
+    filename: str = "",
+):
     if not OPENAI_KEY:
         yield {"type": "error", "message": "OPENAI_API_KEY not set — add it to Railway environment variables"}
         return
@@ -2759,9 +2782,18 @@ async def run_kera_agent(session_id: str, message: str, codeastra_active: bool =
         CHAT_SESSIONS[session_id] = []
     history = CHAT_SESSIONS[session_id]
 
-    # Protect incoming message
+    # ── Protect message ──────────────────────────────────────
     prot_events: list = []
     protected_msg = await protect(message, prot_events, codeastra_active)
+
+    # ── Protect uploaded document (if any) ──────────────────
+    protected_doc = ""
+    if document_text.strip():
+        doc_events: list = []
+        protected_doc = await protect(document_text, doc_events, codeastra_active)
+        for ev in doc_events:
+            if ev["type"] == "intercepted":
+                prot_events.append(ev)
 
     intercept_n = 0
     for ev in prot_events:
@@ -2771,13 +2803,28 @@ async def run_kera_agent(session_id: str, message: str, codeastra_active: bool =
                    "token": ev["token"], "preview": ev["preview"]}
 
     yield {"type": "start", "session_id": session_id,
-           "codeastra_active": codeastra_active, "intercepted": intercept_n}
+           "codeastra_active": codeastra_active, "intercepted": intercept_n,
+           "has_document": bool(protected_doc)}
+
+    # ── Build user turn — embed document in message if provided ─
+    if protected_doc:
+        fname = filename or "uploaded document"
+        user_content = (
+            f"{protected_msg}\n\n"
+            f"--- UPLOADED DOCUMENT: {fname} ---\n"
+            f"{protected_doc}\n"
+            f"--- END OF DOCUMENT ---"
+        )
+        yield {"type": "phase",
+               "message": f"Document '{fname}' tokenized and embedded — KERA has full tool access"}
+    else:
+        user_content = protected_msg
 
     client   = AsyncOpenAI(api_key=OPENAI_KEY)
     messages = [{"role": "system", "content": KERA_SYSTEM}]
     for turn in history[-30:]:
         messages.append({"role": turn["role"], "content": turn["content"]})
-    messages.append({"role": "user", "content": protected_msg})
+    messages.append({"role": "user", "content": user_content})
 
     final_text = ""
 
@@ -2883,7 +2930,9 @@ async def chat_endpoint(req: Request):
         return JSONResponse(status_code=400, content={"error": "message required"})
     return _stream(run_kera_agent(
         session_id, message,
-        codeastra_active=body.get("codeastra_enabled", True),
+        codeastra_active = body.get("codeastra_enabled", True),
+        document_text    = body.get("document_text", ""),
+        filename         = body.get("filename", ""),
     ))
 
 @app.get("/chat/sessions")
