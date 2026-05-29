@@ -1,0 +1,9 @@
+patient_id,first_name,last_name,ssn,date_of_birth,email,phone,address,diagnosis,medication,attending_physician,account_number,insurance_id,emergency_contact
+MRN-001,Marcus,Williams,312-55-8821,1978-06-14,m.williams@gmail.com,555-342-9901,"1422 Birchwood Ave, Atlanta GA 30301",Stage 2 Hypertension,Lisinopril 10mg,Dr. Anita Patel,ACC-7731-4422,INS-BCBS-44821,Karen Williams 555-342-0012
+MRN-002,Sophia,Hernandez,445-67-9012,1964-03-22,sophia.h@outlook.com,555-218-3340,"889 Oak Street, Miami FL 33101",Type 2 Diabetes,Metformin 500mg,Dr. James Okafor,ACC-2291-8813,INS-AETNA-77231,Carlos Hernandez 555-218-0044
+MRN-003,Daniel,Kim,567-89-1234,1991-11-05,dkim91@yahoo.com,555-773-6629,"203 Maple Drive, Seattle WA 98101",Asthma + Anxiety,Albuterol / Sertraline,Dr. Rachel Goldstein,ACC-3398-1144,INS-UNITED-55109,Mina Kim 555-773-0088
+MRN-004,Oluwatobi,Adeyemi,234-56-7890,1955-08-30,t.adeyemi@workmail.ng,555-891-2214,"77 Elmwood Blvd, Houston TX 77001",Atrial Fibrillation,Warfarin 5mg,Dr. Steven Park,ACC-6672-3310,INS-CIGNA-88342,Funke Adeyemi 555-891-0033
+MRN-005,Linda,Johansson,678-90-2345,1983-09-17,linda.j@northcare.se,555-338-4401,"512 Riverside Ct, Minneapolis MN 55401",Hypothyroidism,Levothyroxine 75mcg,Dr. Anita Patel,ACC-1198-7741,INS-HUMANA-33210,Erik Johansson 555-338-0077
+MRN-006,James,Carter,321-44-9821,1970-02-11,j.carter@acme.com,555-447-8801,"990 Pinecrest Lane, Chicago IL 60601",Chronic Kidney Disease Stage 3,Lisinopril + Furosemide,Dr. James Okafor,ACC-4421-5502,INS-BCBS-11098,Sandra Carter 555-447-0022
+MRN-007,Aisha,Mohammed,456-78-0123,1988-07-29,aisha.m@hotmail.com,555-664-3320,"18 Willow Way, Phoenix AZ 85001",Lupus,Hydroxychloroquine 200mg,Dr. Rachel Goldstein,ACC-8813-9987,INS-AETNA-66441,Yusuf Mohammed 555-664-0091
+MRN-008,Robert,Chen,789-01-3456,1950-12-03,rchen@northhospital.org,555-229-7710,"44 Cedar Grove, Boston MA 02101",COPD,Tiotropium / Budesonide,Dr. Steven Park,ACC-5502-3310,INS-UNITED-22987,Helen Chen 555-229-0055

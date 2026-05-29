@@ -1,0 +1,83 @@
+CONFIDENTIAL MERGER AND ACQUISITION AGREEMENT
+
+Agreement Date: March 14, 2025
+Reference: QDC-NB-2025-M&A-0041
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ACQUIRER:
+  Legal Name:     Quantum Dynamics Corp (QDC)
+  EIN:            47-2891034
+  Registered:     State of Delaware
+  Address:        1200 Innovation Drive, Palo Alto, CA 94301
+  CLO:            Sarah Whitmore
+  CLO Email:      s.whitmore@quantumdynamics.com
+  CLO Direct:     +1 650-441-8821
+  CLO SSN:        342-88-9901 (for escrow authorization)
+
+TARGET:
+  Legal Name:     NovaBio Technologies Inc.
+  EIN:            83-1204567
+  Registered:     State of California
+  Address:        88 Biotech Circle, San Diego, CA 92101
+  CEO:            James Okonkwo
+  CEO Email:      j.okonkwo@novabio.tech
+  CEO Direct:     +1 619-774-3320
+  CEO SSN:        456-77-8812 (for escrow authorization)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TRANSACTION TERMS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Purchase Price:       $847,500,000 (USD)
+Earnout Provision:    Up to $120,000,000 based on 2026 revenue milestones
+  - Milestone A:      $40M if NovaBio revenue ≥ $200M in FY2026
+  - Milestone B:      $80M if NovaBio revenue ≥ $300M in FY2026
+
+CEO Retention Package:
+  - Annual Salary:    $2,400,000
+  - Lock-up Period:   3 years (ends March 2028)
+  - Equity Grant:     1.2M QDC shares vesting quarterly
+  - Signing Bonus:    $500,000 (payable on close)
+
+IP Transfer:
+  - 14 patents transferred to QDC on closing
+  - Patent portfolio value estimated at $220M
+  - Pending FDA approval on patent NB-2021-0044 (gene therapy)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RISK AND LIABILITY CLAUSES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7.3  R&W Insurance:
+     $50,000,000 policy, 3-year tail, deductible $2M
+     Underwriter: AIG Transactional Risk Solutions
+
+12.1 Material Adverse Effect (MAE) Trigger:
+     Deal can be terminated if NovaBio revenue declines
+     more than 20% in any quarter prior to closing.
+
+15.4 Non-Compete Clause:
+     5-year global non-compete on Okonkwo and Whitmore
+     Restricted industries: biotech, gene therapy, oncology AI
+     Penalty for breach: $25,000,000 liquidated damages
+
+18.2 Indemnification Cap:
+     General: 15% of purchase price ($127,125,000)
+     Fraud/IP: uncapped
+
+22.1 Governing Law:     State of Delaware
+22.2 Arbitration:       JAMS, San Francisco
+22.3 Expected Close:    Q3 2025 (pending FTC clearance)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ESCROW & BANKING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Escrow Agent:       JPMorgan Chase Private Bank
+Escrow Account:     Account #8847-2291-004
+Routing:            021000021
+Escrow Amount:      $84,750,000 (10% of purchase price)
+Release Condition:  12 months post-close with no indemnity claims

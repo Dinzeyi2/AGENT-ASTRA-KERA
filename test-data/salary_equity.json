@@ -1,0 +1,47 @@
+{
+  "organization": "TriState Health Network",
+  "report_period": "Q1 2025",
+  "analysis_type": "Gender Pay Equity — Nursing Staff",
+  "confidentiality": "STRICTLY CONFIDENTIAL — Do not share outside HR",
+  "hospitals": [
+    {
+      "hospital_id": "HSP-A",
+      "name": "Northside Medical Center",
+      "location": "Atlanta, GA",
+      "employees": [
+        {"emp_id": "E-10041", "role": "RN", "gender": "female", "years_exp": 8,  "salary": 62100, "department": "ICU"},
+        {"emp_id": "E-10042", "role": "RN", "gender": "male",   "years_exp": 9,  "salary": 71400, "department": "ICU"},
+        {"emp_id": "E-10043", "role": "RN", "gender": "female", "years_exp": 5,  "salary": 58400, "department": "ER"},
+        {"emp_id": "E-10044", "role": "RN", "gender": "male",   "years_exp": 5,  "salary": 68900, "department": "ER"},
+        {"emp_id": "E-10045", "role": "RN", "gender": "female", "years_exp": 12, "salary": 67200, "department": "Oncology"},
+        {"emp_id": "E-10046", "role": "RN", "gender": "male",   "years_exp": 11, "salary": 74100, "department": "Oncology"}
+      ]
+    },
+    {
+      "hospital_id": "HSP-B",
+      "name": "Riverside General Hospital",
+      "location": "Miami, FL",
+      "employees": [
+        {"emp_id": "E-20031", "role": "RN", "gender": "female", "years_exp": 6,  "salary": 55800, "department": "ICU"},
+        {"emp_id": "E-20032", "role": "RN", "gender": "male",   "years_exp": 7,  "salary": 72600, "department": "ICU"},
+        {"emp_id": "E-20033", "role": "RN", "gender": "female", "years_exp": 3,  "salary": 51200, "department": "Pediatrics"},
+        {"emp_id": "E-20034", "role": "RN", "gender": "male",   "years_exp": 3,  "salary": 63400, "department": "Pediatrics"},
+        {"emp_id": "E-20035", "role": "RN", "gender": "female", "years_exp": 15, "salary": 69900, "department": "Surgery"},
+        {"emp_id": "E-20036", "role": "RN", "gender": "male",   "years_exp": 14, "salary": 76300, "department": "Surgery"}
+      ]
+    },
+    {
+      "hospital_id": "HSP-C",
+      "name": "Summit Healthcare System",
+      "location": "Chicago, IL",
+      "employees": [
+        {"emp_id": "E-30021", "role": "RN", "gender": "female", "years_exp": 10, "salary": 65300, "department": "Cardiology"},
+        {"emp_id": "E-30022", "role": "RN", "gender": "male",   "years_exp": 10, "salary": 70200, "department": "Cardiology"},
+        {"emp_id": "E-30023", "role": "RN", "gender": "female", "years_exp": 4,  "salary": 59100, "department": "Neurology"},
+        {"emp_id": "E-30024", "role": "RN", "gender": "male",   "years_exp": 4,  "salary": 67800, "department": "Neurology"},
+        {"emp_id": "E-30025", "role": "RN", "gender": "female", "years_exp": 20, "salary": 78400, "department": "Admin"},
+        {"emp_id": "E-30026", "role": "RN", "gender": "male",   "years_exp": 19, "salary": 79100, "department": "Admin"}
+      ]
+    }
+  ]
+}
