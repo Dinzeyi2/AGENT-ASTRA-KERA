@@ -3060,13 +3060,44 @@ async def run_kera_agent(
     _audit("chat_turn", session_id=session_id, intercepted=intercept_n,
            codeastra_active=codeastra_active, reply_len=len(final_text))
 
+    # ── Vault reveal — batch-resolve all tokens found in agent output ──
+    # Agent worked with tokens. We now resolve them AFTER agent is done.
+    # Agent never sees real values. User gets the resolved map.
+    import re as _tok_re
+    _token_pat = _tok_re.compile(r'\[CV[TD]:[A-Z]+:[A-Za-z0-9\-]{4,}\]')
+
+    # Collect tokens from: intercepted events + agent output text
+    _all_tokens: set = set()
+    for ev in prot_events:
+        if ev.get("type") == "intercepted" and ev.get("token"):
+            _all_tokens.add(ev["token"])
+    _all_tokens.update(_token_pat.findall(final_text))
+
+    revealed: dict = {}
+    if _all_tokens and ca_client and codeastra_active:
+        try:
+            _resolved = await codeastra_resolve_batch(list(_all_tokens))
+            revealed = _resolved if isinstance(_resolved, dict) else {}
+            log.info(f"[REVEAL] Resolved {len(revealed)}/{len(_all_tokens)} tokens after agent")
+        except Exception as _rev_err:
+            log.warning(f"[REVEAL] batch resolve error: {_rev_err}")
+
     # Backward-compatible thinking event for old frontends
     if final_text:
         yield {"type": "thinking", "text": final_text}
 
-    yield {"type": "complete", "session_id": session_id,
-           "intercepted": intercept_n,
-           "real_data_seen_by_kera": 0 if codeastra_active else "YES"}
+    yield {
+        "type":                    "complete",
+        "session_id":              session_id,
+        "intercepted":             intercept_n,
+        "real_data_seen_by_kera":  0 if codeastra_active else "YES",
+        "revealed": {
+            "revealed": revealed,
+            "count":    len(revealed),
+            "tokens_found": len(_all_tokens),
+            "note": "Resolved after agent completed — agent never saw these values",
+        },
+    }
 
 
 # ═══════════════════════════════════════════════════════════
