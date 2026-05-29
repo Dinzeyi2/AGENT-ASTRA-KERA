@@ -2829,90 +2829,107 @@ async def run_kera_agent(
     else:
         user_content = protected_msg
 
-    client   = AsyncOpenAI(api_key=OPENAI_KEY)
-    messages = [{"role": "system", "content": KERA_SYSTEM}]
+    client      = AsyncOpenAI(api_key=OPENAI_KEY)
+    kera_trace_id = gen_trace_id()
+    messages    = [{"role": "system", "content": KERA_SYSTEM}]
     for turn in history[-30:]:
         messages.append({"role": turn["role"], "content": turn["content"]})
     messages.append({"role": "user", "content": user_content})
 
+    yield {"type": "trace_start", "trace_id": kera_trace_id,
+           "openai_traces_url": "https://platform.openai.com/logs"}
+
     final_text = ""
 
-    for iteration in range(8):   # max 8 tool-call rounds
-        tool_calls_acc: dict = {}
-        current_text         = ""
-        finish_reason        = None
+    with trace(
+        "KERA Chat",
+        trace_id = kera_trace_id,
+        metadata = {
+            "session_id":       session_id,
+            "has_document":     bool(protected_doc),
+            "filename":         filename or "",
+            "codeastra_active": str(codeastra_active),
+            "intercepted":      str(intercept_n),
+        },
+    ):
+        for iteration in range(8):   # max 8 tool-call rounds
+            tool_calls_acc: dict = {}
+            current_text         = ""
+            finish_reason        = None
 
-        try:
-            stream = await client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages,
-                tools=KERA_OPENAI_TOOLS,
-                tool_choice="auto",
-                stream=True,
-                max_tokens=2000,
-            )
-            async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                choice = chunk.choices[0]
-                delta  = choice.delta
-
-                if delta.content:
-                    current_text += delta.content
-                    final_text   += delta.content
-                    yield {"type": "token", "text": delta.content}
-
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in tool_calls_acc:
-                            tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
-                        if tc.id:
-                            tool_calls_acc[idx]["id"] = tc.id
-                        if tc.function and tc.function.name:
-                            tool_calls_acc[idx]["name"] = tc.function.name
-                        if tc.function and tc.function.arguments:
-                            tool_calls_acc[idx]["arguments"] += tc.function.arguments
-
-                finish_reason = choice.finish_reason
-
-        except Exception as e:
-            yield {"type": "error", "message": str(e)}
-            break
-
-        if finish_reason == "stop" or not tool_calls_acc:
-            break
-
-        # ── Tool calls present — execute them ─────────────
-        tool_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
-
-        messages.append({
-            "role":       "assistant",
-            "content":    current_text or None,
-            "tool_calls": [
-                {"id": tc["id"], "type": "function",
-                 "function": {"name": tc["name"], "arguments": tc["arguments"]}}
-                for tc in tool_list
-            ],
-        })
-
-        for tc in tool_list:
-            yield {"type": "tool_start", "tool": tc["name"]}
             try:
-                args = json.loads(tc["arguments"]) if tc["arguments"] else {}
-            except Exception:
-                args = {}
+                stream = await client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    tools=KERA_OPENAI_TOOLS,
+                    tool_choice="auto",
+                    stream=True,
+                    max_tokens=2000,
+                )
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta  = choice.delta
 
-            result = await _execute_tool(tc["name"], args, session_id)
+                    if delta.content:
+                        current_text += delta.content
+                        final_text   += delta.content
+                        yield {"type": "token", "text": delta.content}
 
-            for ev in result.get("events", []):
-                yield ev
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tool_calls_acc:
+                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc.id:
+                                tool_calls_acc[idx]["id"] = tc.id
+                            if tc.function and tc.function.name:
+                                tool_calls_acc[idx]["name"] = tc.function.name
+                            if tc.function and tc.function.arguments:
+                                tool_calls_acc[idx]["arguments"] += tc.function.arguments
+
+                    finish_reason = choice.finish_reason
+
+            except Exception as e:
+                yield {"type": "error", "message": str(e)}
+                break
+
+            if finish_reason == "stop" or not tool_calls_acc:
+                break
+
+            # ── Tool calls present — execute them ──────────
+            tool_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
 
             messages.append({
-                "role":         "tool",
-                "tool_call_id": tc["id"],
-                "content":      result["text"],
+                "role":       "assistant",
+                "content":    current_text or None,
+                "tool_calls": [
+                    {"id": tc["id"], "type": "function",
+                     "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                    for tc in tool_list
+                ],
             })
+
+            for tc in tool_list:
+                yield {"type": "tool_start", "tool": tc["name"]}
+                try:
+                    args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except Exception:
+                    args = {}
+
+                result = await _execute_tool(tc["name"], args, session_id)
+
+                for ev in result.get("events", []):
+                    yield ev
+
+                messages.append({
+                    "role":         "tool",
+                    "tool_call_id": tc["id"],
+                    "content":      result["text"],
+                })
+
+        flush_traces()
 
     # Persist conversation
     history.append({"role": "user",      "content": user_content})
