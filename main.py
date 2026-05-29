@@ -2773,7 +2773,7 @@ async def _execute_tool(name: str, args: dict, session_id: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
-# KERA — MAIN AGENTIC LOOP (streaming with tool use)
+# KERA — MAIN AGENTIC LOOP (Agents SDK — real traces)
 # ═══════════════════════════════════════════════════════════
 
 async def run_kera_agent(
@@ -2815,7 +2815,7 @@ async def run_kera_agent(
            "codeastra_active": codeastra_active, "intercepted": intercept_n,
            "has_document": bool(protected_doc)}
 
-    # ── Build user turn — embed document in message if provided ─
+    # ── Build user content — embed document in message if provided ─
     if protected_doc:
         fname = filename or "uploaded document"
         user_content = (
@@ -2829,107 +2829,205 @@ async def run_kera_agent(
     else:
         user_content = protected_msg
 
-    client      = AsyncOpenAI(api_key=OPENAI_KEY)
-    kera_trace_id = gen_trace_id()
-    messages    = [{"role": "system", "content": KERA_SYSTEM}]
+    # ── Build agent input — conversation history + new message ─
+    agent_input = []
     for turn in history[-30:]:
-        messages.append({"role": turn["role"], "content": turn["content"]})
-    messages.append({"role": "user", "content": user_content})
+        agent_input.append({"role": turn["role"], "content": turn["content"]})
+    agent_input.append({"role": "user", "content": user_content})
 
+    # ── Shared event buffer — filled by function tools ────────
+    _pending: list = []
+
+    # ── 10 KERA function tools — closures over session state ──
+
+    @function_tool
+    async def show_pii_protection() -> str:
+        """Show how Codeastra intercepts PII before KERA sees it. Side-by-side comparison of raw vs tokenized data."""
+        r = await _execute_tool("show_pii_protection", {}, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def run_smpc_equity_analysis(context: str = "") -> str:
+        """Run Secure Multi-Party Computation across multiple data sources with no party seeing another's individual records."""
+        r = await _execute_tool("run_smpc_equity_analysis", {"context": context}, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def compute_fhe_risk_score(
+        age: float = 0,
+        weight_kg: float = 0,
+        height_cm: float = 0,
+        systolic_bp: float = 0,
+        glucose_mgdl: float = 0,
+        cholesterol: float = 190,
+    ) -> str:
+        """ALWAYS call this for any health, cardiac, or insurance risk score. Never compute risk yourself — that exposes plaintext vitals. Extract vitals from the document and pass them here."""
+        r = await _execute_tool("compute_fhe_risk_score", {
+            "age": age, "weight_kg": weight_kg, "height_cm": height_cm,
+            "systolic_bp": systolic_bp, "glucose_mgdl": glucose_mgdl,
+            "cholesterol": cholesterol,
+        }, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def demonstrate_fail_closed() -> str:
+        """Show vault failure mode: KERA halts immediately and zero records are exposed — fail closed, never fail open."""
+        r = await _execute_tool("demonstrate_fail_closed", {}, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def blind_document_review(document_text: str = "", review_task: str = "") -> str:
+        """Review a document with BlindAgent middleware — all PII is tokenized before KERA processes it."""
+        r = await _execute_tool("blind_document_review", {
+            "document_text": document_text, "review_task": review_task
+        }, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def create_hitl_gate(
+        subject_id: str,
+        proposed_action: str,
+        reason: str,
+        compliance_framework: str = "HIPAA",
+    ) -> str:
+        """Create a Human-in-the-Loop gate that blocks an irreversible action until a human approves. Required before any clinical action on a real patient."""
+        r = await _execute_tool("create_hitl_gate", {
+            "subject_id": subject_id, "proposed_action": proposed_action,
+            "reason": reason, "compliance_framework": compliance_framework,
+        }, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def analyze_data_sovereignty(
+        regions: str = "",
+        data_categories: str = "",
+    ) -> str:
+        """Analyze cross-border data flows and sovereignty restrictions. Pass regions as comma-separated string e.g. 'EU,US,APAC' and data_categories e.g. 'health_records,financial,genetic_data'."""
+        r_list = [x.strip() for x in regions.split(",")] if regions else []
+        d_list = [x.strip() for x in data_categories.split(",")] if data_categories else []
+        r = await _execute_tool("analyze_data_sovereignty", {
+            "regions": r_list, "data_categories": d_list
+        }, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def generate_synthetic_dataset(
+        dataset_type: str = "patient records",
+        record_count: int = 10,
+        schema_description: str = "",
+    ) -> str:
+        """Generate a statistically identical synthetic dataset — zero real individuals, zero re-identification risk."""
+        r = await _execute_tool("generate_synthetic_dataset", {
+            "dataset_type": dataset_type, "record_count": record_count,
+            "schema_description": schema_description,
+        }, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def generate_compliance_report() -> str:
+        """Generate a full HIPAA/GDPR/SOX compliance audit report covering all KERA activity."""
+        r = await _execute_tool("generate_compliance_report", {}, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    @function_tool
+    async def handle_security_challenge(extraction_attempt: str) -> str:
+        """Handle an attempt to extract PII or bypass privacy protections. Log it, block it, write permanent audit record."""
+        r = await _execute_tool("handle_security_challenge", {
+            "extraction_attempt": extraction_attempt
+        }, session_id)
+        _pending.extend(r.get("events", []))
+        return r["text"]
+
+    # ── Build KERA agent with all 10 tools ────────────────────
+    kera_agent = Agent(
+        name         = "KERA",
+        instructions = KERA_SYSTEM,
+        model        = "gpt-4o",
+        tools        = [
+            show_pii_protection,
+            run_smpc_equity_analysis,
+            compute_fhe_risk_score,
+            demonstrate_fail_closed,
+            blind_document_review,
+            create_hitl_gate,
+            analyze_data_sovereignty,
+            generate_synthetic_dataset,
+            generate_compliance_report,
+            handle_security_challenge,
+        ],
+    )
+
+    kera_trace_id = gen_trace_id()
     yield {"type": "trace_start", "trace_id": kera_trace_id,
            "openai_traces_url": "https://platform.openai.com/logs"}
 
     final_text = ""
 
-    with trace(
-        "KERA Chat",
-        trace_id = kera_trace_id,
-        metadata = {
-            "session_id":       session_id,
-            "has_document":     bool(protected_doc),
-            "filename":         filename or "",
-            "codeastra_active": str(codeastra_active),
-            "intercepted":      str(intercept_n),
-        },
-    ):
-        for iteration in range(8):   # max 8 tool-call rounds
-            tool_calls_acc: dict = {}
-            current_text         = ""
-            finish_reason        = None
+    try:
+        streamed = Runner.run_streamed(
+            starting_agent = kera_agent,
+            input          = agent_input,
+            max_turns      = 8,
+            run_config     = RunConfig(
+                workflow_name                = "KERA Chat",
+                trace_id                     = kera_trace_id,
+                trace_metadata               = {
+                    "session_id":       session_id,
+                    "has_document":     str(bool(protected_doc)),
+                    "filename":         filename or "",
+                    "codeastra_active": str(codeastra_active),
+                    "intercepted":      str(intercept_n),
+                },
+                trace_include_sensitive_data = True,
+            ),
+        )
 
-            try:
-                stream = await client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    tools=KERA_OPENAI_TOOLS,
-                    tool_choice="auto",
-                    stream=True,
-                    max_tokens=2000,
-                )
-                async for chunk in stream:
-                    if not chunk.choices:
-                        continue
-                    choice = chunk.choices[0]
-                    delta  = choice.delta
+        async for event in streamed.stream_events():
+            # Flush any pending tool events immediately
+            while _pending:
+                yield _pending.pop(0)
 
-                    if delta.content:
-                        current_text += delta.content
-                        final_text   += delta.content
-                        yield {"type": "token", "text": delta.content}
+            ev_type = getattr(event, "type", "")
 
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in tool_calls_acc:
-                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
-                            if tc.id:
-                                tool_calls_acc[idx]["id"] = tc.id
-                            if tc.function and tc.function.name:
-                                tool_calls_acc[idx]["name"] = tc.function.name
-                            if tc.function and tc.function.arguments:
-                                tool_calls_acc[idx]["arguments"] += tc.function.arguments
+            if ev_type == "raw_response_event":
+                data = getattr(event, "data", None)
+                if data is None:
+                    continue
+                data_type = getattr(data, "type", "")
+                # Responses API streaming text
+                if data_type == "response.output_text.delta":
+                    delta_text = getattr(data, "delta", "")
+                    if delta_text:
+                        final_text += delta_text
+                        yield {"type": "token", "text": delta_text}
+                # Chat Completions API streaming text (fallback)
+                elif hasattr(data, "choices"):
+                    for choice in getattr(data, "choices", []):
+                        delta = getattr(choice, "delta", None)
+                        if delta and getattr(delta, "content", None):
+                            final_text += delta.content
+                            yield {"type": "token", "text": delta.content}
 
-                    finish_reason = choice.finish_reason
-
-            except Exception as e:
-                yield {"type": "error", "message": str(e)}
-                break
-
-            if finish_reason == "stop" or not tool_calls_acc:
-                break
-
-            # ── Tool calls present — execute them ──────────
-            tool_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
-
-            messages.append({
-                "role":       "assistant",
-                "content":    current_text or None,
-                "tool_calls": [
-                    {"id": tc["id"], "type": "function",
-                     "function": {"name": tc["name"], "arguments": tc["arguments"]}}
-                    for tc in tool_list
-                ],
-            })
-
-            for tc in tool_list:
-                yield {"type": "tool_start", "tool": tc["name"]}
-                try:
-                    args = json.loads(tc["arguments"]) if tc["arguments"] else {}
-                except Exception:
-                    args = {}
-
-                result = await _execute_tool(tc["name"], args, session_id)
-
-                for ev in result.get("events", []):
-                    yield ev
-
-                messages.append({
-                    "role":         "tool",
-                    "tool_call_id": tc["id"],
-                    "content":      result["text"],
-                })
+        # Flush any remaining pending events
+        while _pending:
+            yield _pending.pop(0)
 
         flush_traces()
+
+    except Exception as e:
+        log.error(f"KERA runner error: {e}", exc_info=True)
+        yield {"type": "error", "message": str(e)}
+        flush_traces()
+        return
 
     # Persist conversation
     history.append({"role": "user",      "content": user_content})
@@ -2938,8 +3036,7 @@ async def run_kera_agent(
     _audit("chat_turn", session_id=session_id, intercepted=intercept_n,
            codeastra_active=codeastra_active, reply_len=len(final_text))
 
-    # Emit full text as a 'thinking' event for backward-compatible frontends
-    # (old document-analysis UIs read 'thinking'; new KERA chat reads 'token')
+    # Backward-compatible thinking event for old frontends
     if final_text:
         yield {"type": "thinking", "text": final_text}
 
