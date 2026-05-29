@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>CodeAstra Developer Docs v2.1.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#020205;--sf:#07070e;--sf2:#0c0c17;--bd:#13132a;--bd2:#1a1a32;
+  --g:#00ff88;--gd:rgba(0,255,136,.12);--gd2:rgba(0,255,136,.05);
+  --r:#ff3355;--rd:rgba(255,51,85,.12);
+  --b:#3399ff;--bd3:rgba(51,153,255,.12);
+  --y:#ffbb00;--yd:rgba(255,187,0,.12);
+  --p:#aa55ff;--pd:rgba(170,85,255,.12);
+  --tx:#d0d0ec;--t2:#585878;--t3:#2e2e44;
+  --mono:'Space Mono',monospace;--sans:'Syne',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:var(--bg);color:var(--tx);font-family:var(--mono);height:100vh;overflow:hidden}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,255,136,.004) 3px,rgba(0,255,136,.004) 4px);pointer-events:none;z-index:9999}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+
+/* ── LAYOUT ─── */
+.shell{display:grid;grid-template-columns:240px 1fr;grid-template-rows:52px 1fr;height:100vh}
+
+/* ── NAV ─── */
+nav{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid var(--bd);background:rgba(2,2,5,.95);backdrop-filter:blur(12px);z-index:100}
+.logo{font-family:var(--sans);font-weight:900;font-size:17px;color:var(--g);letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+.logo-sub{font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:var(--t2);font-family:var(--mono);font-weight:400}
+.nav-r{display:flex;align-items:center;gap:12px}
+.nav-pill{display:flex;align-items:center;gap:5px;font-size:8px;letter-spacing:.16em;text-transform:uppercase;padding:3px 9px;border:1px solid rgba(0,255,136,.22);border-radius:2px;color:var(--g)}
+.nav-link{padding:5px 12px;background:transparent;border:1px solid var(--bd2);color:var(--t2);font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;border-radius:2px;transition:all .15s;text-decoration:none;display:inline-flex;align-items:center}
+.nav-link:hover{border-color:var(--g);color:var(--g)}
+
+/* ── SIDEBAR ─── */
+aside{border-right:1px solid var(--bd);background:var(--sf);display:flex;flex-direction:column;overflow:hidden}
+.toc{flex:1;overflow-y:auto;padding:14px 12px}
+.toc-label{font-size:7px;letter-spacing:.2em;text-transform:uppercase;color:var(--t2);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+.toc-item{display:block;padding:5px 8px;font-size:8px;color:var(--t2);text-decoration:none;border-radius:2px;border:1px solid transparent;margin-bottom:2px;transition:all .12s;cursor:pointer;line-height:1.4}
+.toc-item:hover{border-color:var(--bd2);color:var(--tx);background:var(--sf2)}
+.toc-item.active{border-color:rgba(0,255,136,.3);color:var(--g);background:var(--gd2)}
+.toc-num{color:var(--t3);margin-right:5px}
+.toc-meta{padding:12px 14px;border-top:1px solid var(--bd);font-size:8px;color:var(--t3);line-height:1.8;flex-shrink:0}
+.toc-meta a{color:var(--g);text-decoration:none}
+.toc-meta a:hover{text-decoration:underline}
+
+/* ── MAIN CONTENT ─── */
+.doc-main{overflow-y:auto;padding:32px 40px;line-height:1.8}
+
+/* ── DOC SECTIONS ─── */
+.doc-hero{margin-bottom:40px;padding-bottom:24px;border-bottom:1px solid var(--bd)}
+.doc-hero h1{font-family:var(--sans);font-size:28px;font-weight:900;color:var(--g);letter-spacing:-.02em;margin-bottom:6px}
+.doc-hero-meta{font-size:9px;color:var(--t2);letter-spacing:.12em;margin-bottom:12px}
+.doc-hero-meta span{margin-right:16px}
+.doc-hero-meta code{background:var(--bd);padding:1px 5px;border-radius:2px;color:var(--g);font-size:8px}
+.doc-tagline{font-size:13px;color:var(--tx);padding:10px 14px;border-left:2px solid var(--g);background:var(--gd2);border-radius:0 2px 2px 0;font-style:italic}
+
+.doc-section{margin-bottom:48px;scroll-margin-top:20px}
+.doc-section h2{font-family:var(--sans);font-size:16px;font-weight:900;color:var(--tx);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px}
+.sec-num{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--g);background:var(--gd);padding:2px 7px;border-radius:2px;flex-shrink:0}
+.doc-section h3{font-family:var(--sans);font-size:12px;font-weight:700;color:var(--b);margin:18px 0 8px;letter-spacing:.02em}
+.doc-section p{font-size:10px;color:var(--tx);line-height:1.85;margin-bottom:10px}
+.doc-section ul,.doc-section ol{margin:8px 0 12px 18px;font-size:10px;color:var(--tx);line-height:1.85}
+.doc-section li{margin-bottom:3px}
+
+/* Code blocks */
+pre{background:var(--sf2);border:1px solid var(--bd2);border-radius:2px;padding:14px 16px;overflow-x:auto;margin:10px 0 16px;font-size:9px;line-height:1.75;position:relative}
+pre code{font-family:var(--mono);color:var(--tx)}
+.lang-tag{position:absolute;top:6px;right:8px;font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2)}
+code{font-family:var(--mono);background:var(--bd);padding:1px 5px;border-radius:2px;font-size:9px;color:var(--g)}
+pre code{background:none;padding:0;color:var(--tx)}
+
+/* Inline highlights */
+.hl-g{color:var(--g)}
+.hl-b{color:var(--b)}
+.hl-y{color:var(--y)}
+.hl-r{color:var(--r)}
+.hl-p{color:var(--p)}
+
+/* Notes / callouts */
+.note{padding:10px 14px;border-left:2px solid var(--y);background:var(--yd);border-radius:0 2px 2px 0;font-size:9px;color:var(--tx);line-height:1.75;margin:12px 0}
+.note-g{border-color:var(--g);background:var(--gd2)}
+.note-r{border-color:var(--r);background:var(--rd)}
+.note-b{border-color:var(--b);background:var(--bd3)}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;font-size:9px;margin:10px 0 16px}
+th{font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2);padding:6px 10px;text-align:left;border-bottom:1px solid var(--bd2);background:var(--sf)}
+td{padding:6px 10px;border-bottom:1px solid var(--t3);vertical-align:top;line-height:1.6}
+td:first-child{color:var(--g);font-weight:700;white-space:nowrap}
+tr:hover td{background:var(--sf2)}
+
+/* Method badges */
+.method{display:inline-block;padding:1px 6px;border-radius:2px;font-size:7px;letter-spacing:.08em;text-transform:uppercase;margin-right:4px;flex-shrink:0}
+.method-get{background:var(--gd);color:var(--g);border:1px solid rgba(0,255,136,.2)}
+.method-post{background:var(--bd3);color:var(--b);border:1px solid rgba(51,153,255,.2)}
+.method-delete{background:var(--rd);color:var(--r);border:1px solid rgba(255,51,85,.2)}
+.method-put{background:var(--yd);color:var(--y);border:1px solid rgba(255,187,0,.2)}
+
+/* Layer cards */
+.layer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}
+.layer-card{background:var(--sf2);border:1px solid var(--bd2);border-radius:2px;padding:14px}
+.layer-card:nth-child(1){border-top:2px solid var(--g)}
+.layer-card:nth-child(2){border-top:2px solid var(--b)}
+.layer-card:nth-child(3){border-top:2px solid var(--p)}
+.layer-title{font-family:var(--sans);font-size:11px;font-weight:900;margin-bottom:6px}
+.layer-card:nth-child(1) .layer-title{color:var(--g)}
+.layer-card:nth-child(2) .layer-title{color:var(--b)}
+.layer-card:nth-child(3) .layer-title{color:var(--p)}
+.layer-desc{font-size:8px;color:var(--t2);line-height:1.7}
+
+/* Quick ref sections */
+.qr-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:10px 0}
+.qr-block{background:var(--sf2);border:1px solid var(--bd2);border-radius:2px;padding:12px}
+.qr-label{font-size:7px;letter-spacing:.16em;text-transform:uppercase;color:var(--t2);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--bd)}
+.qr-block pre{background:var(--bg);margin:0;padding:8px 10px}
+
+/* Compliance grid */
+.comp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}
+.comp-badge{background:var(--sf2);border:1px solid var(--bd2);border-radius:2px;padding:10px}
+.comp-name{font-family:var(--sans);font-size:11px;font-weight:900;color:var(--g);margin-bottom:4px}
+.comp-desc{font-size:8px;color:var(--t2);line-height:1.6}
+
+/* Version history */
+.version-row{display:grid;grid-template-columns:100px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--t3);font-size:9px}
+.version-tag{color:var(--g);font-weight:700}
+.version-desc{color:var(--t2);line-height:1.6}
+
+/* Flow diagram */
+.flow{background:var(--sf2);border:1px solid var(--bd2);border-radius:2px;padding:14px 16px;font-size:9px;line-height:2;margin:10px 0 16px;font-family:var(--mono)}
+.flow-arrow{color:var(--g)}
+.flow-label{color:var(--b)}
+.flow-note{color:var(--t2);font-size:8px;margin-left:8px}
+
+/* Separator */
+.section-sep{height:1px;background:var(--bd);margin:32px 0}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+<!-- ── NAV ───────────────────────────────────── -->
+<nav>
+  <div class="logo">
+    CodeAstra
+    <span class="logo-sub">Developer Documentation v2.1.0</span>
+  </div>
+  <div class="nav-r">
+    <span style="font-size:9px;color:var(--t2)">Base URL: <code style="background:var(--bd);padding:1px 5px;border-radius:2px;color:var(--g);font-size:8px">https://app.codeastra.dev</code></span>
+    <div class="nav-pill">SDK v2.1.0</div>
+    <a href="/" class="nav-link">← Back to KERA</a>
+  </div>
+</nav>
+
+<!-- ── SIDEBAR — TABLE OF CONTENTS ──────────── -->
+<aside>
+  <div class="toc">
+    <div class="toc-label">Table of Contents</div>
+    <a class="toc-item" onclick="scrollTo('s0')"><span class="toc-num">—</span>Overview</a>
+    <a class="toc-item" onclick="scrollTo('s1')"><span class="toc-num">01</span>Install &amp; Authenticate</a>
+    <a class="toc-item" onclick="scrollTo('s2')"><span class="toc-num">02</span>Make Any Data Blind</a>
+    <a class="toc-item" onclick="scrollTo('s3')"><span class="toc-num">03</span>Make Any AI Agent Blind</a>
+    <a class="toc-item" onclick="scrollTo('s4')"><span class="toc-num">04</span>Sensitivity Policy</a>
+    <a class="toc-item" onclick="scrollTo('s5')"><span class="toc-num">05</span>ThinkingTokens</a>
+    <a class="toc-item" onclick="scrollTo('s6')"><span class="toc-num">06</span>Thinking Executor</a>
+    <a class="toc-item" onclick="scrollTo('s7')"><span class="toc-num">07</span>Blind RAG</a>
+    <a class="toc-item" onclick="scrollTo('s8')"><span class="toc-num">08</span>Federated Fine-Tuning</a>
+    <a class="toc-item" onclick="scrollTo('s9')"><span class="toc-num">09</span>Human-in-the-Loop</a>
+    <a class="toc-item" onclick="scrollTo('s10')"><span class="toc-num">10</span>Smart Tokens</a>
+    <a class="toc-item" onclick="scrollTo('s11')"><span class="toc-num">11</span>BYOK &amp; Crypto-Delete</a>
+    <a class="toc-item" onclick="scrollTo('s12')"><span class="toc-num">12</span>FHE</a>
+    <a class="toc-item" onclick="scrollTo('s13')"><span class="toc-num">13</span>Compliance &amp; Audit</a>
+    <a class="toc-item" onclick="scrollTo('s14')"><span class="toc-num">14</span>Deployment Modes</a>
+    <a class="toc-item" onclick="scrollTo('s15')"><span class="toc-num">15</span>SDK Quick Reference</a>
+    <a class="toc-item" onclick="scrollTo('s16')"><span class="toc-num">—</span>Full API Reference</a>
+  </div>
+  <div class="toc-meta">
+    Auth: <code>X-API-Key: sk-guard-xxx</code><br>
+    pip install codeastra<br>
+    <a href="https://app.codeastra.dev" target="_blank">app.codeastra.dev</a>
+  </div>
+</aside>
+
+<!-- ── MAIN DOC CONTENT ───────────────────────── -->
+<main class="doc-main" id="doc-main">
+
+  <!-- HERO -->
+  <div class="doc-hero" id="s0">
+    <h1>CodeAstra Developer Documentation</h1>
+    <div class="doc-hero-meta">
+      <span>Version: <code>2.1.0</code></span>
+      <span>Base URL: <code>https://app.codeastra.dev</code></span>
+      <span>Auth: <code>X-API-Key: sk-guard-xxx</code></span>
+    </div>
+    <div class="doc-tagline">The AI can act on the secret, without learning the secret.</div>
+    <p style="margin-top:14px;font-size:10px;color:var(--t2)">This document covers everything your team needs to build with CodeAstra. Every section is about doing something — protecting data, wrapping agents, building RAG pipelines, training models. Every code example is verified against the actual SDK (<code>sdk/codeastra/client.py</code> v2.1.0).</p>
+
+    <div class="layer-grid" style="margin-top:20px">
+      <div class="layer-card">
+        <div class="layer-title">Layer 1 — BlindAgent</div>
+        <div class="layer-desc">Wrap any AI agent. It becomes blind to sensitive data automatically. Works with LangChain, CrewAI, Claude, OpenAI, or anything with <code>.run()</code> / <code>.invoke()</code>.</div>
+      </div>
+      <div class="layer-card">
+        <div class="layer-title">Layer 2 — ThinkingTokens</div>
+        <div class="layer-desc">Real value goes to vault. Facts stay outside. Agent queries facts in natural language. Gets token IDs back — never real values. 50,000 records, zero exposure.</div>
+      </div>
+      <div class="layer-card">
+        <div class="layer-title">Layer 3 — Thinking Executor</div>
+        <div class="layer-desc">Agent sends token IDs. Executor resolves real values, fires integrations, wipes. Agent gets success/fail. Real values exist for milliseconds.</div>
+      </div>
+    </div>
+
+    <div class="flow" style="margin-top:16px">
+      <span class="flow-label">User data</span> <span class="flow-arrow">→</span> Codeastra vault <span class="flow-arrow">→</span> tokens<br>
+      Agent sees tokens only <span class="flow-note">— never real values</span><br>
+      Executor resolves tokens <span class="flow-arrow">→</span> fires integrations<br>
+      Real values wiped immediately after action<br>
+      Agent receives result <span class="flow-note">— never saw anything real</span>
+    </div>
+  </div>
+
+  <!-- SECTION 1 -->
+  <div class="doc-section" id="s1">
+    <h2><span class="sec-num">01</span> Install &amp; Authenticate</h2>
+    <pre><code class="lang-bash">pip install codeastra
+pip install codeastra[fhe]       # + Fully Homomorphic Encryption
+pip install codeastra[training]  # + Federated fine-tuning</code><span class="lang-tag">bash</span></pre>
+    <p>Get your API key at <code>app.codeastra.dev</code>. Every request uses the same header:</p>
+    <pre><code>X-API-Key: sk-guard-xxx</code></pre>
+
+    <h3>Python SDK</h3>
+    <pre><code class="lang-python">from codeastra import CodeAstraClient
+
+client = CodeAstraClient(api_key="sk-guard-xxx")
+
+# Or read key from environment — no code change needed
+# export CODEASTRA_API_KEY=sk-guard-xxx
+client = CodeAstraClient()  # auto-reads CODEASTRA_API_KEY</code><span class="lang-tag">python</span></pre>
+    <p>If no key is provided and none is in the environment, the SDK calls <code>/auth/signup</code> automatically and saves credentials to <code>~/.codeastra/credentials</code>.</p>
+
+    <h3>Direct LLM invoke with auto-protection</h3>
+    <pre><code class="lang-python">result = client.invoke(
+    prompt = "Summarize the account for John Smith SSN 123-45-6789",
+    model  = "claude-sonnet-4-6",  # or gpt-4o, gemini-1.5-pro
+)
+# → { "response": "...", "tokens_protected": 2, "real_data_seen_by_model": false }</code><span class="lang-tag">python</span></pre>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span></td><td><code>/invoke</code></td><td>Tokenize prompt, invoke LLM, return response</td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td><code>/auth/signup</code></td><td>Auto-create account, save credentials locally</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- SECTION 2 -->
+  <div class="doc-section" id="s2">
+    <h2><span class="sec-num">02</span> Make Any Data Blind</h2>
+    <p>Before any AI agent, RAG pipeline, or fine-tuning job touches your data, Astra replaces real values with vault tokens. The AI sees tokens. Real values stay in the vault.</p>
+
+    <h3>Protect free text</h3>
+    <pre><code class="lang-python">safe = client.protect_text("Call James at james@goldman.com SSN 234-56-7890")
+# → "Call James at [CVT:EMAIL:A1B2] [CVT:SSN:C3D4]"
+
+# Full response with entity list
+full = client.protect_text_full("Call James at james@goldman.com SSN 234-56-7890")
+# → { "protected_text": "...", "entities": [...], "tokens_created": 2 }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Tokenize structured records</h3>
+    <pre><code class="lang-python">tokens = client.tokenize({
+    "name":  "John Smith",
+    "ssn":   "123-45-6789",
+    "email": "john@hospital.org",
+    "age":   34,      # not sensitive — stays as-is
+    "ward":  "ICU"    # not sensitive — stays as-is
+})
+# → {
+#     "name":  "[CVT:NAME:A1B2]",
+#     "ssn":   "[CVT:SSN:C3D4]",
+#     "email": "[CVT:EMAIL:E5F6]",
+#     "age":   34,
+#     "ward":  "ICU"
+#   }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Resolve a token (executor only)</h3>
+    <pre><code class="lang-python">result = client.vault_resolve("[CVT:EMAIL:A1B2]")
+# → { "authorized": true, "real_value": "john@hospital.org" }
+
+results = client.vault_resolve_batch(["[CVT:EMAIL:A1B2]", "[CVT:SSN:C3D4]"])</code><span class="lang-tag">python</span></pre>
+    <div class="note note-r">Resolution is gated. Only your executor layer can call this endpoint. Your AI agent cannot.</div>
+
+    <h3>Wipe real values permanently</h3>
+    <pre><code class="lang-python">client.vault_wipe_token("[CVT:EMAIL:A1B2]")      # wipe single token
+client.vault_wipe_cohort("hospital_2024")         # wipe entire cohort
+client.vault_wipe_session(session_id)              # wipe entire session
+
+# Deletion proof for GDPR auditors
+proof = client.vault_wipe_proof()
+# → {
+#     "proven": true,
+#     "wiped_at": "2025-05-28T14:22:11Z",
+#     "real_value_exists": false,
+#     "compliance_statement": "Real value permanently deleted. Cannot be recovered."
+#   }</code><span class="lang-tag">python</span></pre>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span></td><td><code>/protect/text</code></td><td>Tokenize any free text</td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td><code>/vault/store</code></td><td>Tokenize structured fields</td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td><code>/vault/resolve</code></td><td>Resolve token → real value (executor only)</td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td><code>/vault/resolve-batch</code></td><td>Resolve multiple tokens at once</td></tr>
+        <tr><td><span class="method method-post">POST</span></td><td><code>/vault/wipe/{token_id}</code></td><td>Manual wipe one token</td></tr>
+        <tr><td><span class="method method-get">GET</span></td><td><code>/vault/wipe/proof</code></td><td>Cryptographic deletion proof</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- SECTION 3 -->
+  <div class="doc-section" id="s3">
+    <h2><span class="sec-num">03</span> Make Any AI Agent Blind</h2>
+    <p>Wrap your existing agent in <code>BlindAgentMiddleware</code>. From that point forward, sensitive data in any prompt, response, or tool call is tokenized before the AI sees it.</p>
+    <pre><code class="lang-python">from codeastra import BlindAgentMiddleware
+
+agent = BlindAgentMiddleware(your_agent, api_key="sk-guard-xxx")
+
+result = agent.invoke({"input": "Process intake for SSN 234-56-7890, email john@hospital.org"})
+# Agent received: "Process intake for [CVT:SSN:C3D4] [CVT:EMAIL:A1B2]"
+# real_data_seen_by_agent: 0</code><span class="lang-tag">python</span></pre>
+
+    <h3>LangChain</h3>
+    <pre><code class="lang-python">from langchain.agents import initialize_agent
+from codeastra import BlindAgentMiddleware
+
+langchain_agent = initialize_agent(tools, llm, agent="zero-shot-react-description")
+blind = BlindAgentMiddleware(langchain_agent, api_key="sk-guard-xxx")
+result = blind.invoke({"input": "Summarize patient record for John Smith DOB 1984-03-21"})</code><span class="lang-tag">python</span></pre>
+
+    <h3>CrewAI</h3>
+    <pre><code class="lang-python">from crewai import Crew
+from codeastra import BlindAgentMiddleware
+
+crew = Crew(agents=[...], tasks=[...])
+blind = BlindAgentMiddleware(crew, api_key="sk-guard-xxx")
+blind.invoke({"input": "Analyze trading desk report for DESK-4421"})</code><span class="lang-tag">python</span></pre>
+
+    <h3>Claude (Anthropic)</h3>
+    <pre><code class="lang-python">import anthropic
+from codeastra import BlindAgentMiddleware
+
+class ClaudeAgent:
+    def invoke(self, inp):
+        c = anthropic.Anthropic()
+        return c.messages.create(
+            model="claude-sonnet-4-6", max_tokens=1024,
+            messages=[{"role": "user", "content": inp["input"]}]
+        ).content[0].text
+
+blind = BlindAgentMiddleware(ClaudeAgent(), api_key="sk-guard-xxx")
+blind.invoke({"input": "Analyze account AC-8847291"})</code><span class="lang-tag">python</span></pre>
+
+    <h3>OpenAI</h3>
+    <pre><code class="lang-python">import openai
+from codeastra import BlindAgentMiddleware
+
+class OpenAIAgent:
+    def invoke(self, inp):
+        return openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": inp["input"]}]
+        ).choices[0].message.content
+
+blind = BlindAgentMiddleware(OpenAIAgent(), api_key="sk-guard-xxx")
+blind.invoke({"input": "Draft letter to Patricia Walsh at 212-555-0100"})</code><span class="lang-tag">python</span></pre>
+
+    <h3>Deployment modes</h3>
+    <pre><code class="lang-python">BlindAgentMiddleware(agent, api_key="sk-guard-xxx")                  # cloud (default)
+BlindAgentMiddleware(agent, api_key="sk-guard-xxx", mode="onprem")   # vault never leaves your network
+BlindAgentMiddleware(agent, api_key="sk-guard-xxx", mode="hybrid")   # vault on-prem, LLM in cloud
+BlindAgentMiddleware(agent, api_key="sk-guard-xxx", zero_log=True)   # no trace stored anywhere</code><span class="lang-tag">python</span></pre>
+
+    <h3>Protected multi-turn sessions</h3>
+    <pre><code class="lang-python">session    = client.session_create(name="intake-flow", classification="pii")
+session_id = session["session_id"]
+
+result  = client.invoke(prompt="Patient is John Smith, SSN 123-45-6789", session_id=session_id)
+result2 = client.invoke(prompt="Schedule a follow-up for the same patient", session_id=session_id)
+# Second turn — John Smith already tokenized, token reused
+
+client.vault_wipe_session(session_id)
+client.session_delete(session_id)</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 4 -->
+  <div class="doc-section" id="s4">
+    <h2><span class="sec-num">04</span> Sensitivity Policy — Teach Astra Your Data</h2>
+    <p>Out of the box, Astra catches SSNs, emails, phone numbers, credit cards, names, passport numbers, and 80+ other standard patterns. Use the policy API to define what sensitive means at your company.</p>
+
+    <h3>Set industry context</h3>
+    <pre><code class="lang-python">client.set_context(
+    industry               = "healthcare",   # healthcare | finance | legal | hr | government
+    data_scope             = "phi",          # phi | pii | pci | confidential
+    classification_level   = "restricted",
+    extra_sensitive_fields = ["diagnosis", "treatment_plan", "insurance_id"],
+    safe_fields            = ["ward", "department"],  # never tokenize these
+)</code><span class="lang-tag">python</span></pre>
+
+    <h3>Register custom sensitive fields</h3>
+    <pre><code class="lang-python">client.register_sensitive_type(
+    fields   = ["fund_id", "desk_code", "position_size"],
+    prefixes = ["GSAM-", "DESK-"],    # any value starting with these prefixes
+    doc_types = ["trade_report"],
+)</code><span class="lang-tag">python</span></pre>
+
+    <h3>Full sensitivity policy</h3>
+    <pre><code class="lang-python">client.set_sensitivity_policy(
+    sensitive_fields    = ["patient_id", "diagnosis", "dob"],
+    sensitive_prefixes  = ["MRN-", "ACCT-"],
+    field_classifications = {
+        "salary":    "financial",
+        "diagnosis": "phi",
+        "phone":     "pii",
+    },
+    strict_mode = True,  # block requests with unclassified sensitive data
+)</code><span class="lang-tag">python</span></pre>
+
+    <h3>Test your policy before going live</h3>
+    <pre><code class="lang-python">result = client.test_sensitivity(
+    content = {
+        "patient_id": "MRN-8847",
+        "diagnosis":  "type_2_diabetes",
+        "ward":       "ICU",
+        "age":        67,
+    }
+)
+# → { "would_tokenize": ["patient_id", "diagnosis"], "would_keep": ["ward", "age"] }</code><span class="lang-tag">python</span></pre>
+    <div class="note">Dry-runs the policy against real samples without tokenizing anything. Run this before going to production.</div>
+
+    <h3>K-anonymity threshold</h3>
+    <pre><code class="lang-python">client.set_anonymity(
+    k_minimum         = 5,
+    suppress_singleton = True,
+    quasi_identifiers  = ["age", "zip_code", "gender"],
+)</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 5 -->
+  <div class="doc-section" id="s5">
+    <h2><span class="sec-num">05</span> ThinkingTokens — AI That Acts Without Seeing</h2>
+    <p>ThinkingTokens let you run an AI over thousands of sensitive records without the AI ever reading them. Real values go into the vault. The AI works with facts and signals only.</p>
+
+    <div class="flow">
+      1. Mint a ThinkingToken per record. Real value → vault. Facts → visible to AI.<br>
+      2. AI queries facts in natural language. Gets back token IDs, never real values.<br>
+      3. Executor takes token IDs, resolves real values, fires actions, wipes.
+    </div>
+
+    <h3>Mint a ThinkingToken</h3>
+    <pre><code class="lang-python">token = client.think_mint(
+    real_value = "Maria Santos | SSN:234-56-7890 | Phone:404-555-0192",
+    data_type  = "patient",
+    facts      = {
+        "age":               30,
+        "risk":              "high",
+        "diagnosis":         "diabetes",
+        "last_contact_days": 45,
+        "insurance":         "medicaid",
+    },
+    cohort_id         = "hospital_2024",
+    signal_conditions = [
+        {"if": "risk == 'high'",         "signal": "needs_callback_today"},
+        {"if": "last_contact_days > 30", "signal": "overdue_contact"},
+    ],
+    ttl_hours = 720,
+)
+# → { "token_id": "tht_PATI_c7dd388e4f" }
+# Maria Santos is in the vault. The AI never sees her name or SSN.</code><span class="lang-tag">python</span></pre>
+
+    <h3>Mint in bulk</h3>
+    <pre><code class="lang-python">results = client.think_mint_batch([
+    {
+        "real_value": "John Doe | DOB: 1981-04-12",
+        "data_type":  "patient",
+        "facts":      {"age": 43, "risk": "low"},
+        "cohort_id":  "hospital_2024",
+    },
+    # ... more records
+])
+# → { "tokens": ["tht_PATI_abc", ...], "minted": 100 }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Query in natural language</h3>
+    <pre><code class="lang-python">results = client.think_query(
+    query     = "high risk patients not contacted in 30 days",
+    cohort_id = "hospital_2024",
+    top_k     = 200,
+)
+# → {
+#     "matched_tokens":          ["tht_PATI_c7dd388e4f", ...],
+#     "match_count":             201,
+#     "real_data_seen_by_agent": 0
+#   }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Get proactive signals</h3>
+    <pre><code class="lang-python">signals = client.think_signal("hospital_2024")
+# → {
+#     "signals": [
+#       { "token_id": "tht_PATI_c7dd388e4f", "signal": "needs_callback_today" },
+#       { "token_id": "tht_PATI_d8ee499f50", "signal": "overdue_contact" }
+#     ],
+#     "real_data_seen": 0
+#   }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Read token memory</h3>
+    <pre><code class="lang-python">memory = client.think_memory("tht_PATI_c7dd388e4f")
+# → {
+#     "events": [
+#       { "type": "query_match",    "query": "high risk...",       "at": "..." },
+#       { "type": "signal_fired",   "signal": "needs_callback_today", "at": "..." },
+#       { "type": "executor_action","action": "call", "result": "completed", "at": "..." }
+#     ]
+#   }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Revoke a token</h3>
+    <pre><code class="lang-python">client.think_revoke("tht_PATI_c7dd388e4f")
+# Real value wiped. Token stops resolving. Memory purged.</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 6 -->
+  <div class="doc-section" id="s6">
+    <h2><span class="sec-num">06</span> Thinking Executor — Fire Integrations Without Exposing Data</h2>
+    <p>The executor is the only layer that resolves tokens into real values. It resolves, fires the action, wipes. Your AI agent only ever sees the result: success or failure.</p>
+
+    <h3>Register integrations</h3>
+    <pre><code class="lang-python">client.executor_register_integration("vapi", {
+    "api_key":         "vapi_live_xxx",
+    "phone_number_id": "pn_xxx",
+    "assistant_id":    "asst_xxx"
+})
+client.executor_register_integration("twilio", {
+    "account_sid": "AC...",
+    "auth_token":  "...",
+    "from_number": "+15551234567"
+})
+client.executor_register_integration("sendgrid", {
+    "api_key":    "SG.xxx",
+    "from_email": "noreply@yourcompany.com"
+})
+client.executor_register_integration("stripe", {"api_key": "sk_live_..."})
+client.executor_register_integration("webhook", {
+    "url":     "https://your-server.com/hook",
+    "method":  "POST",
+    "headers": {"Authorization": "Bearer xxx"}
+})</code><span class="lang-tag">python</span></pre>
+    <p style="font-size:9px;color:var(--t2)">All supported: Vapi, Twilio, SendGrid, Stripe, Plaid, Epic EHR, DocuSign, Salesforce, HubSpot, Zendesk, any HTTPS webhook.</p>
+
+    <h3>Define decision rules</h3>
+    <pre><code class="lang-python">client.executor_register_rule(
+    name="call_high_risk",   integration="vapi",     action_type="call",
+    conditions=[{"field": "risk", "op": "eq", "value": "high"}],   priority=10,
+)
+client.executor_register_rule(
+    name="sms_medium",       integration="twilio",   action_type="sms",
+    conditions=[{"field": "risk", "op": "eq", "value": "medium"}], priority=5,
+)
+client.executor_register_rule(
+    name="email_overdue",    integration="sendgrid", action_type="email",
+    conditions=[{"field": "last_contact_days", "op": "gt", "value": 30}], priority=1,
+)</code><span class="lang-tag">python</span></pre>
+
+    <h3>Run on a cohort</h3>
+    <pre><code class="lang-python">result = client.executor_run_cohort("hospital_2024")
+# → {
+#     "tokens_processed":         50000,
+#     "total_actions":             8347,
+#     "total_succeeded":           8289,
+#     "total_wiped":               50000,   ← real values gone automatically
+#     "real_value_seen_by_agent":  false
+#   }
+
+result = client.executor_run("tht_PATI_c7dd388e4f")             # single token
+result = client.executor_run("tht_PATI_c7dd388e4f", dry_run=True)  # dry run</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 7 -->
+  <div class="doc-section" id="s7">
+    <h2><span class="sec-num">07</span> Blind RAG — Documents Your AI Can Reason Over But Never Read</h2>
+    <p>Documents are tokenized before they are stored. The LLM queries a token index. It never reads the raw documents.</p>
+
+    <div class="flow">
+      Sensitive documents <span class="flow-arrow">→</span> tokenize on ingest <span class="flow-arrow">→</span> token index stored<br>
+      LLM query <span class="flow-arrow">→</span> search token index <span class="flow-arrow">→</span> retrieve relevant token chunks<br>
+      LLM receives token chunks <span class="flow-arrow">→</span> generates answer <span class="flow-note">— real values never appear</span>
+    </div>
+
+    <h3>Ingest a document</h3>
+    <pre><code class="lang-python">result = client.rag_ingest(
+    content        = {
+        "text":       "Patient John Smith, SSN 123-45-6789, diagnosed with...",
+        "patient_id": "MRN-8847",
+        "year":       2024,
+    },
+    doc_type       = "patient_record",
+    title          = "Patient Intake 2024",
+    source         = "EHR",
+    classification = "phi",
+)
+# → { "document_id": "doc_xxx", "chunks": 12, "real_content_stored": false }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Search</h3>
+    <pre><code class="lang-python">results = client.rag_search(
+    query     = "treatments for diabetic patients over 60",
+    doc_type  = "patient_record",
+    top_k     = 5,
+    min_score = 0.3,
+)
+# → {
+#     "results": [
+#       { "doc_id": "doc_xxx", "chunk": "Treatment for [CVT:CONDITION:X1Y2]...", "score": 0.94 }
+#     ],
+#     "real_content_seen_by_llm": false
+#   }</code><span class="lang-tag">python</span></pre>
+
+    <h3>Ingest a batch / delete a document</h3>
+    <pre><code class="lang-python">results = client.rag_ingest_batch([
+    {"content": {"text": "Record 001...", "patient_id": "MRN-001"}, "doc_type": "patient_record"},
+    {"content": {"text": "Record 002...", "patient_id": "MRN-002"}, "doc_type": "patient_record"},
+])
+
+client.rag_delete("doc_xxx")   # all chunks and token mappings — permanently deleted</code><span class="lang-tag">python</span></pre>
+    <div class="note note-b">Blind RAG search returns token-indexed chunks. Pass them as context to <code>client.invoke()</code> for final answer generation. Real values stay in the vault throughout.</div>
+  </div>
+
+  <!-- SECTION 8 -->
+  <div class="doc-section" id="s8">
+    <h2><span class="sec-num">08</span> Federated Blind Fine-Tuning — Train Your Own LLM</h2>
+    <p>Fine-tune an LLM on your sensitive data and cryptographically prove the model never saw the real values. The output is a model you own.</p>
+
+    <h3>Supported base models</h3>
+    <table>
+      <thead><tr><th>Key</th><th>Description</th><th>Best for</th></tr></thead>
+      <tbody>
+        <tr><td><code>phi3-mini</code></td><td>3.8B — fast, capable</td><td>Most use cases (default)</td></tr>
+        <tr><td><code>llama3.1-8b</code></td><td>8B — Meta's best open model</td><td>Production quality</td></tr>
+        <tr><td><code>mistral-7b</code></td><td>7B — strong reasoning</td><td>Long docs, analysis</td></tr>
+        <tr><td><code>qwen2.5-7b</code></td><td>7B — multilingual</td><td>Non-English data</td></tr>
+        <tr><td><code>gemma2-2b</code></td><td>2B — Google small</td><td>Fast inference</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Single organization — step by step</h3>
+    <pre><code class="lang-python">import requests
+
+# Step 1 — Create job
+job = requests.post(
+    "https://app.codeastra.dev/training/jobs",
+    headers={"X-API-Key": "sk-guard-xxx"},
+    json={
+        "base_model":      "phi3-mini",
+        "federation_mode": "single_org",
+        "domain":          "healthcare",
+        "task_type":       "reasoning",
+        "num_epochs":      3,
+        "lora_r":          16,
+    }
+).json()
+job_id = job["job_id"]
+
+# Step 2 — Supply synthetic twin records
+requests.post(
+    f"https://app.codeastra.dev/training/jobs/{job_id}/start",
+    headers={"X-API-Key": "sk-guard-xxx"},
+    json={
+        "records": [
+            {"age": 67, "diagnosis": "type_2_diabetes", "treatment_notes": "Patient responds well..."},
+        ],
+        "is_tokenized": False  # synthetic twin rows — fake values, real patterns
+    }
+)
+
+# Step 3 — Poll for completion
+import time
+while True:
+    s = requests.get(
+        f"https://app.codeastra.dev/training/jobs/{job_id}",
+        headers={"X-API-Key": "sk-guard-xxx"}
+    ).json()
+    print(f"Status: {s['status']} | Progress: {s['progress']:.0%}")
+    if s["status"] in ("completed", "failed", "cancelled"):
+        break
+    time.sleep(10)
+
+print(s["real_data_seen_by_model"])  # → False</code><span class="lang-tag">python</span></pre>
+
+    <h3>Multi-organization federated training</h3>
+    <pre><code class="lang-python">job = requests.post(
+    "https://app.codeastra.dev/training/jobs",
+    headers={"X-API-Key": "sk-guard-org-a"},
+    json={
+        "base_model":      "phi3-mini",
+        "federation_mode": "federated",
+        "n_orgs":          3,
+        "total_rounds":    5,
+        "cohort_id":       "hospital_network_2025",
+        "domain":          "healthcare",
+    }
+).json()
+
+# Submit SMPC-protected gradient after local training
+requests.post(
+    "https://app.codeastra.dev/training/federated/gradient",
+    headers={"X-API-Key": "sk-guard-org-a"},
+    params={"job_id": job["job_id"]},
+    json={
+        "round_number":    1,
+        "gradient_values": [0.0023, -0.0041, 0.0018],
+        "index_map":       {"layer": "lm_head"},
+    }
+)
+# When all 3 orgs submit → Astra aggregates via Shamir — individual gradients never revealed</code><span class="lang-tag">python</span></pre>
+
+    <h3>Differential privacy</h3>
+    <pre><code class="lang-python">json={
+    "federation_mode": "dp_federated",
+    "dp_epsilon": 8.0,   # 1.0=strong privacy | 8.0=good balance | 100.0=near-zero cost
+    "dp_delta":   1e-5,
+}</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 9 -->
+  <div class="doc-section" id="s9">
+    <h2><span class="sec-num">09</span> Human-in-the-Loop — Approval Gates Before Any Action</h2>
+    <p>HITL requests are created automatically by your policies and guardrails. A human then reviews and approves or rejects before any action fires.</p>
+
+    <h3>List &amp; decide</h3>
+    <pre><code class="lang-python">pending = client.hitl_list(status="pending", limit=50)
+# → { "hitl_requests": [{ "id": "hitl_xxx", "action": "executor_run_cohort", ... }] }
+
+# Approve
+client.hitl_decide(
+    hitl_id  = "hitl_xxx",
+    decision = "approve",
+    reason   = "Reviewed patient list. Proceed.",
+    reviewer = "dr.chen@hospital.org",
+)
+
+# Reject
+client.hitl_decide(hitl_id="hitl_xxx", decision="reject", reason="Hold for compliance review.")</code><span class="lang-tag">python</span></pre>
+
+    <h3>Use webhooks instead of polling</h3>
+    <pre><code class="lang-python">client.webhook_create(
+    url    = "https://your-app.com/codeastra-webhooks",
+    events = ["hitl_required", "policy_violation", "injection_detected"],
+    secret = "your-webhook-signing-secret",
+)</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 10 -->
+  <div class="doc-section" id="s10">
+    <h2><span class="sec-num">10</span> Smart Tokens — Policy-Gated Access</h2>
+    <p>Smart Tokens add conditional logic on top of vault tokens. Define the exact conditions under which a token can be revealed. If conditions aren't met, the token is policy-blocked — not just unauthenticated.</p>
+
+    <pre><code class="lang-python">smart = client.smart_tokenize(
+    real_value      = "IBAN: GB29NWBK60161331926819",
+    data_type       = "bank_account",
+    allowed_actions = ["payment_initiation"],
+    allowed_targets = ["https://payments.internal.com"],
+    max_uses        = 1,      # single-use — burned after first reveal
+    ttl_seconds     = 86400,
+    semantic_label  = "payment_iban",
+)
+# → { "token_id": "tok_BANK_abc123", "max_uses": 1 }
+
+result = client.smart_token_execute(
+    token_id    = "tok_BANK_abc123",
+    action_type = "payment_initiation",
+    target_url  = "https://payments.internal.com",
+    field_name  = "destination_iban",
+)
+# → { "real_value": "GB29NWBK60161331926819", "uses_remaining": 0, "burned": true }
+# If action not in allowed_actions: { "error": "policy_blocked" }
+
+client.smart_token_revoke("tok_BANK_abc123")
+
+audit = client.smart_token_audit("tok_BANK_abc123")
+# → [{ "type": "minted" }, { "type": "executed" }, { "type": "burned" }]</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 11 -->
+  <div class="doc-section" id="s11">
+    <h2><span class="sec-num">11</span> BYOK — Bring Your Own Key &amp; Crypto-Delete</h2>
+    <p>Integrate your own KMS. Your vault data is encrypted with your key. Astra never holds the plaintext. Deleting your key makes all vault data permanently irrecoverable instantly.</p>
+
+    <pre><code class="lang-python"># AWS KMS
+client.byok_configure(provider="aws_kms",  key_arn="arn:aws:kms:us-east-1:123456789:key/mrk-abc123")
+
+# GCP KMS
+client.byok_configure(provider="gcp_kms",  key_id="projects/my-proj/locations/global/keyRings/my-ring/cryptoKeys/my-key")
+
+# HashiCorp Vault
+client.byok_configure(provider="hashicorp_vault", vault_url="https://vault.yourcompany.com", key_path="transit/keys/codeastra")
+
+client.byok_test()    # verify key is accessible
+client.byok_rotate()  # re-encrypt all tokens with new key version — no downtime
+
+# GDPR Article 17 — crypto-delete
+result = client.byok_cryptographic_delete()
+# → { "deleted": true, "tokens_made_irrecoverable": 48291 }
+# Key deleted. Every token encrypted with it is permanently unreadable.</code><span class="lang-tag">python</span></pre>
+    <div class="note note-g">GDPR Article 17 at the cryptographic level: You do not need to find and delete individual records. Delete the key — everything encrypted with it becomes irrecoverable in milliseconds.</div>
+  </div>
+
+  <!-- SECTION 12 -->
+  <div class="doc-section" id="s12">
+    <h2><span class="sec-num">12</span> FHE — Compute on Encrypted Data</h2>
+    <p>Fully Homomorphic Encryption lets you run computations on data without decrypting it. The server never sees plaintext. Only you can decrypt the result.</p>
+    <pre><code class="lang-bash">pip install codeastra[fhe]   # required for local encrypt/decrypt</code><span class="lang-tag">bash</span></pre>
+
+    <h3>One-shot: encrypt → compute → decrypt</h3>
+    <pre><code class="lang-python"># Server sees only ciphertext — never the salary value
+result = client.fhe_full_compute(
+    value     = 95000.0,
+    operation = "percentage_of",
+    params    = {"rate": 7.5},
+)
+print(result)  # → 7125.0  — server never saw 95000</code><span class="lang-tag">python</span></pre>
+
+    <h3>Manual flow</h3>
+    <pre><code class="lang-python">session    = client.fhe_setup(preset="standard")
+ciphertext = client.fhe_encrypt(95000.0, session)
+
+he_result  = client.fhe_compute(
+    operation          = "percentage_of",
+    encrypted_inputs   = {"value": ciphertext},
+    plaintext_params   = {"rate": 7.5},
+    key_id             = session.key_id,
+    public_context_b64 = session.public_context_b64,
+)
+
+plaintext = client.fhe_decrypt(he_result, session)
+print(plaintext)  # → 7125.0</code><span class="lang-tag">python</span></pre>
+
+    <h3>SIMD batch</h3>
+    <pre><code class="lang-python">session    = client.fhe_setup()
+ciphertext = client.fhe_encrypt_batch([95000.0, 72000.0, 110000.0], session)
+he_result  = client.fhe_compute_batch(
+    operation="percentage_of", encrypted_inputs={"value": ciphertext},
+    plaintext_params={"rate": 7.5}, key_id=session.key_id,
+    public_context_b64=session.public_context_b64,
+)
+results = client.fhe_decrypt_batch(he_result, session)
+print(results)  # → [7125.0, 5400.0, 8250.0]</code><span class="lang-tag">python</span></pre>
+    <p style="font-size:9px;color:var(--t2)">Supported operations: <code>percentage_of</code> · <code>add_constant</code> · <code>multiply_constant</code> · <code>subtract_constant</code> · <code>compare_gt</code> · <code>compare_lt</code></p>
+  </div>
+
+  <!-- SECTION 13 -->
+  <div class="doc-section" id="s13">
+    <h2><span class="sec-num">13</span> Compliance &amp; Audit</h2>
+
+    <pre><code class="lang-python">report = client.compliance_report(frameworks=["hipaa", "pci-dss", "gdpr", "soc2"])
+report = client.compliance_report_full()
+
+data     = client.audit_export_json(limit=1000)
+csv_text = client.audit_export_csv(limit=1000)
+path     = client.export_audit(output_path="audit_report.json")
+
+result = client.verify_audit()
+# → { "verified": true, "chain_valid": true, "tampered_entries": 0 }
+
+baa = client.legal_baa_generate(
+    company_name="City Hospital", contact_email="legal@cityhospital.org",
+    effective_date="2025-06-01",
+)
+client.compliance_sync(targets=["vanta", "drata"])</code><span class="lang-tag">python</span></pre>
+
+    <div class="comp-grid">
+      <div class="comp-badge"><div class="comp-name">HIPAA</div><div class="comp-desc">All 18 PHI identifiers auto-detected. PHI never enters LLM context. BAA generated programmatically.</div></div>
+      <div class="comp-badge"><div class="comp-name">PCI-DSS</div><div class="comp-desc">Cards tokenized with Luhn validation. Single-use Smart Tokens. Executor-only reveal.</div></div>
+      <div class="comp-badge"><div class="comp-name">GDPR</div><div class="comp-desc">Right to erasure via BYOK crypto-delete. Data minimization enforced by default.</div></div>
+      <div class="comp-badge"><div class="comp-name">SOC 2</div><div class="comp-desc">Tamper-proof audit logs. Zero-knowledge architecture. On-premise available.</div></div>
+      <div class="comp-badge"><div class="comp-name">SOX</div><div class="comp-desc">Immutable audit chain. Every access timestamped with agent ID.</div></div>
+      <div class="comp-badge"><div class="comp-name">FINRA</div><div class="comp-desc">Trade-related PII protected. Audit log meets examination requirements.</div></div>
+      <div class="comp-badge"><div class="comp-name">GLBA</div><div class="comp-desc">Financial PII tokenized. Vault AES-256 at rest, TLS 1.3 in transit.</div></div>
+      <div class="comp-badge"><div class="comp-name">DORA</div><div class="comp-desc">On-premise mode for EU data sovereignty.</div></div>
+      <div class="comp-badge"><div class="comp-name">EU AI Act</div><div class="comp-desc">All agent actions logged. Human oversight enforced via HITL layer.</div></div>
+    </div>
+  </div>
+
+  <!-- SECTION 14 -->
+  <div class="doc-section" id="s14">
+    <h2><span class="sec-num">14</span> Deployment Modes</h2>
+    <table>
+      <thead><tr><th>Mode</th><th>Vault location</th><th>Best for</th></tr></thead>
+      <tbody>
+        <tr><td><code>cloud</code> (default)</td><td>Astra infrastructure</td><td>Fast start, most companies</td></tr>
+        <tr><td><code>onprem</code></td><td>Inside your network</td><td>Regulated industries, banks, hospitals</td></tr>
+        <tr><td><code>hybrid</code></td><td>On-prem vault + cloud LLM</td><td>Data sovereignty + cloud inference</td></tr>
+        <tr><td><code>zero_log=True</code></td><td>No trace anywhere</td><td>Intelligence, legal, maximum privacy</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Cloud (default)</h3>
+    <pre><code class="lang-python">client = CodeAstraClient(api_key="sk-guard-xxx")</code><span class="lang-tag">python</span></pre>
+
+    <h3>On-premise</h3>
+    <pre><code class="lang-bash">docker run -d -p 4000:4000 \
+  -e CODEASTRA_LICENSE_KEY=your_license_key \
+  -e VAULT_ENCRYPTION_KEY=your_256_bit_key \
+  -v /your/data:/vault/data \
+  codeastra/vault:latest</code><span class="lang-tag">bash</span></pre>
+    <pre><code class="lang-python">client = CodeAstraClient(api_key="sk-guard-xxx", mode="onprem",
+                         base_url="http://vault.yourcompany.internal:4000")</code><span class="lang-tag">python</span></pre>
+
+    <h3>Hybrid &amp; Zero log</h3>
+    <pre><code class="lang-python">client = CodeAstraClient(api_key="sk-guard-xxx", mode="hybrid",
+                         base_url="http://vault.yourcompany.internal:4000")
+
+client = CodeAstraClient(api_key="sk-guard-xxx", zero_log=True)
+# Sets X-Zero-Log: true on every request — no trace stored at Astra</code><span class="lang-tag">python</span></pre>
+  </div>
+
+  <!-- SECTION 15 — QUICK REF -->
+  <div class="doc-section" id="s15">
+    <h2><span class="sec-num">15</span> SDK Quick Reference</h2>
+    <pre><code class="lang-bash">pip install codeastra           # core
+pip install codeastra[fhe]      # + FHE (TenSEAL)
+pip install codeastra[training] # + federated fine-tuning</code><span class="lang-tag">bash</span></pre>
+    <pre><code class="lang-python">from codeastra import CodeAstraClient, BlindAgentMiddleware
+client = CodeAstraClient(api_key="sk-guard-xxx")</code><span class="lang-tag">python</span></pre>
+
+    <div class="qr-grid">
+      <div class="qr-block">
+        <div class="qr-label">Make Data Blind</div>
+        <pre><code>client.protect_text(text)
+client.protect_text_full(text)
+client.tokenize(data_dict)
+client.vault_resolve(token)
+client.vault_resolve_batch(tokens)
+client.vault_wipe_token(token_id)
+client.vault_wipe_cohort(cohort_id)
+client.vault_wipe_session(session_id)
+client.vault_wipe_proof()</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">Blind Agent</div>
+        <pre><code>BlindAgentMiddleware(agent, api_key=..., mode=...)
+agent.invoke({"input": "..."})
+client.invoke(prompt, model)
+client.session_create(name, classification)
+client.vault_wipe_session(session_id)
+client.session_delete(session_id)</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">ThinkingTokens</div>
+        <pre><code>client.think_mint(real_value, data_type, facts, cohort_id)
+client.think_mint_batch(tokens_list)
+client.think_query(query, cohort_id, top_k)
+client.think_signal(cohort_id)
+client.think_memory(token_id)
+client.think_revoke(token_id)</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">Thinking Executor</div>
+        <pre><code>client.executor_register_integration(name, config)
+client.executor_register_rule(name, integration,
+  action_type, conditions, priority)
+client.executor_run(token_id, dry_run)
+client.executor_run_cohort(cohort_id, limit)</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">Blind RAG</div>
+        <pre><code>client.rag_ingest(content_dict, doc_type, title)
+client.rag_ingest_batch(documents)
+client.rag_search(query, doc_type, top_k, min_score)
+client.rag_delete(doc_id)</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">Smart Tokens</div>
+        <pre><code>client.smart_tokenize(real_value, data_type,
+  allowed_actions, max_uses, ttl_seconds)
+client.smart_tokenize_batch(tokens_list)
+client.smart_token_execute(token_id, action_type)
+client.smart_token_revoke(token_id)
+client.smart_token_audit(token_id)</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">BYOK</div>
+        <pre><code>client.byok_configure(provider, key_arn)
+client.byok_test()
+client.byok_rotate()
+client.byok_cryptographic_delete()</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">FHE</div>
+        <pre><code>client.fhe_full_compute(value, operation, params)
+client.fhe_setup(preset="standard")
+client.fhe_encrypt(value, session)
+client.fhe_compute(operation, encrypted_inputs, ...)
+client.fhe_decrypt(result, session)
+client.fhe_encrypt_batch(values, session)
+client.fhe_decrypt_batch(result, session)</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">Compliance &amp; Audit</div>
+        <pre><code>client.compliance_report(frameworks=["hipaa","gdpr"])
+client.compliance_report_full()
+client.audit_export_json(limit)
+client.audit_export_csv(limit)
+client.verify_audit()
+client.legal_baa_generate(company_name, contact_email)
+client.compliance_sync(targets)</code></pre>
+      </div>
+      <div class="qr-block">
+        <div class="qr-label">Sensitivity Policy</div>
+        <pre><code>client.set_context(industry, data_scope, ...)
+client.register_sensitive_type(fields, prefixes)
+client.set_sensitivity_policy(sensitive_fields, ...)
+client.test_sensitivity(content)
+client.set_anonymity(k_minimum, quasi_identifiers)</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 16 — FULL API REF -->
+  <div class="doc-section" id="s16">
+    <h2><span class="sec-num">—</span> Full API Reference</h2>
+    <p style="font-size:9px;color:var(--t2)">Base URL: <code>https://app.codeastra.dev</code> &nbsp;|&nbsp; Auth: <code>X-API-Key: sk-guard-xxx</code></p>
+
+    <h3>Protect &amp; Vault</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span> <code>/protect/text</code></td><td></td><td>Tokenize any free text</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/vault/store</code></td><td></td><td>Tokenize structured fields</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/vault/resolve</code></td><td></td><td>Resolve token → real value (executor only)</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/vault/resolve-batch</code></td><td></td><td>Resolve multiple tokens at once</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/vault/stats</code></td><td></td><td>Vault statistics</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/vault/wipe/{token_id}</code></td><td></td><td>Manual wipe</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/vault/wipe/proof</code></td><td></td><td>Cryptographic deletion proof</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/vault/wipe/stats</code></td><td></td><td>Wipe statistics</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Sensitivity Recipes</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span> <code>/recipes</code></td><td></td><td>Create a recipe</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/recipes</code></td><td></td><td>List all recipes</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/recipes/templates</code></td><td></td><td>Browse built-in templates</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/recipes/from-template</code></td><td></td><td>Activate template in one click</td></tr>
+        <tr><td><span class="method method-put">PUT</span> <code>/recipes/{id}</code></td><td></td><td>Update rules</td></tr>
+        <tr><td><span class="method method-delete">DELETE</span> <code>/recipes/{id}</code></td><td></td><td>Delete recipe</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/recipes/{id}/test</code></td><td></td><td>Dry run against sample data</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/recipes/stats/matches</code></td><td></td><td>What each recipe has caught</td></tr>
+      </tbody>
+    </table>
+
+    <h3>ThinkingTokens</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span> <code>/think/mint</code></td><td></td><td>Mint a ThinkingToken</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/think/mint/batch</code></td><td></td><td>Mint up to 100 at once</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/think/query</code></td><td></td><td>Natural language query</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/think/signal</code></td><td></td><td>Get proactive signals</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/think/{id}</code></td><td></td><td>Token metadata</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/think/{id}/memory</code></td><td></td><td>What the token has learned</td></tr>
+        <tr><td><span class="method method-delete">DELETE</span> <code>/think/{id}</code></td><td></td><td>Revoke token</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/think/stats</code></td><td></td><td>System-wide statistics</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Thinking Executor</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span> <code>/executor/integrations</code></td><td></td><td>Register an integration</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/executor/rules</code></td><td></td><td>Add a decision rule</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/executor/run</code></td><td></td><td>Run on single token — wipes automatically</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/executor/run/cohort</code></td><td></td><td>Run on entire cohort — wipes automatically</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/executor/plan</code></td><td></td><td>Agent sends full plan, executor handles everything</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/executor/session/{id}</code></td><td></td><td>Real-time session status</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/executor/log</code></td><td></td><td>Action audit log</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/executor/supported</code></td><td></td><td>All supported integrations</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Smart Tokens</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-post">POST</span> <code>/vault/smart-token</code></td><td></td><td>Mint with policy gates</td></tr>
+        <tr><td><span class="method method-post">POST</span> <code>/vault/smart-token/execute</code></td><td></td><td>Policy-gated JIT reveal</td></tr>
+        <tr><td><span class="method method-delete">DELETE</span> <code>/vault/smart-token/{id}</code></td><td></td><td>Revoke immediately</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/vault/smart-token/{id}/audit</code></td><td></td><td>Reveal audit trail</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Audit</h3>
+    <table>
+      <thead><tr><th>Method</th><th>Endpoint</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><span class="method method-get">GET</span> <code>/audit/secure</code></td><td></td><td>Tamper-proof audit log</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/audit/secure/verify</code></td><td></td><td>Verify log integrity</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/audit/export/json</code></td><td></td><td>Export as JSON</td></tr>
+        <tr><td><span class="method method-get">GET</span> <code>/audit/export/csv</code></td><td></td><td>Export as CSV</td></tr>
+      </tbody>
+    </table>
+
+    <h3>SDK Version History</h3>
+    <div class="version-row"><span class="version-tag">v2.1.0</span><span class="version-desc">Current — verified against all examples in this document</span></div>
+    <div class="version-row"><span class="version-tag">v1.6.0</span><span class="version-desc">ThinkingTokens, Thinking Executor, OmegaTokens, protect_text(), vault_resolve(), Sensitivity Recipes, Zero Persistence</span></div>
+    <div class="version-row"><span class="version-tag">v1.5.2</span><span class="version-desc">BlindAgentMiddleware, SmartTokens, Blind RAG, K-anonymity, Context-aware sensitivity</span></div>
+    <div class="version-row"><span class="version-tag">v1.1.0</span><span class="version-desc">Cloud/OnPrem/Hybrid modes, zero_log, auto-signup, HMAC verification</span></div>
+
+    <div class="note note-g" style="margin-top:24px">
+      117/117 tests passed across healthcare, fintech, legal, government, HR, e-commerce.<br>
+      Real data seen by Claude across all industries: <strong>0</strong>.
+    </div>
+  </div>
+
+  <div style="height:60px"></div><!-- bottom padding -->
+</main>
+
+</div><!-- /shell -->
+
+<script>
+function scrollTo(id){
+  const el = document.getElementById(id);
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  document.querySelectorAll('.toc-item').forEach(a => {
+    a.classList.toggle('active', a.getAttribute('onclick')===`scrollTo('${id}')`);
+  });
+}
+
+// Highlight active section on scroll
+const main = document.getElementById('doc-main');
+const sections = ['s0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11','s12','s13','s14','s15','s16'];
+main.addEventListener('scroll', () => {
+  let active = 's0';
+  for(const id of sections){
+    const el = document.getElementById(id);
+    if(el && el.offsetTop - 40 <= main.scrollTop) active = id;
+  }
+  document.querySelectorAll('.toc-item').forEach(a => {
+    a.classList.toggle('active', a.getAttribute('onclick')===`scrollTo('${active}')`);
+  });
+});
+</script>
+</body>
+</html>

@@ -976,6 +976,10 @@ def _stream(gen):
 async def index():
     with open("index.html") as f: return HTMLResponse(f.read())
 
+@app.get("/docs")
+async def docs_page():
+    with open("docs.html") as f: return HTMLResponse(f.read())
+
 @app.get("/health")
 async def health():
     codeastra_ok = False
