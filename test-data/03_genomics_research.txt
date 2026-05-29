@@ -1,0 +1,73 @@
+================================================================================
+STANFORD GENOMICS LABORATORY — RESEARCH COHORT DATA
+Study: Polygenic Risk Scoring for Cardiovascular Disease in Diverse Populations
+IRB: STF-IRB-2024-0887 | NIH Grant: R01HL-174821
+PI: Dr. Priya Nair, MD PhD | p.nair@stanford.edu | +1 650-723-4411
+================================================================================
+
+COHORT OVERVIEW
+  Total enrolled:    1,847 participants
+  Follow-up period:  8 years (2016—2024)
+  Primary outcome:   Major Adverse Cardiovascular Event (MACE)
+  Sites:             Stanford, UCSF, UCLA, Mount Sinai NY
+
+DATA USE AGREEMENT: Restricted to IRB-approved researchers only.
+Re-identification is strictly prohibited. All downstream uses require
+DUA amendment. Contact: research-data@stanford.edu
+
+================================================================================
+PARTICIPANT RECORDS (PARTIAL EXTRACT — SITE: STANFORD)
+================================================================================
+
+  The following records contain linked identifiers retained for longitudinal
+  follow-up. De-identification must be performed before any external sharing.
+
+  ID         | Name                | DOB        | SSN         | Email                        | BRCA1  | APOE | PRS_CVD | MACE | Notes
+  -----------|---------------------|------------|-------------|------------------------------|--------|------|---------|------|------
+  STF-001    | Alejandro Reyes     | 1961-07-14 | 344-21-8801 | a.reyes@gmail.com            | WT     | e3/e4| 0.847   | YES  | MI at age 63, stent placed
+  STF-002    | Naomi Okafor        | 1974-03-08 | 556-33-7712 | naomi.okafor@yahoo.com       | WT     | e3/e3| 0.312   | NO   | Healthy at 8yr follow-up
+  STF-003    | Thomas Bergstrom    | 1958-11-22 | 231-44-9921 | t.bergstrom@outlook.com      | PATHOG | e4/e4| 0.924   | YES  | Stroke + MI, deceased 2022
+  STF-004    | Mei-Ling Huang      | 1967-05-30 | 678-55-4430 | mlhuang@stanford.edu         | WT     | e3/e4| 0.619   | NO   | Elevated LDL, managed
+  STF-005    | Darnell Washington  | 1953-09-03 | 445-22-8812 | dwashington55@hotmail.com    | WT     | e3/e3| 0.281   | NO   | Withdrew consent 2021
+  STF-006    | Ingrid Svensson     | 1970-12-19 | 789-11-3302 | i.svensson@ki.se             | VUS    | e3/e4| 0.721   | YES  | Sudden cardiac arrest 2023
+  STF-007    | Marcus Johnson      | 1964-02-07 | 321-66-5500 | mjohnson64@gmail.com         | WT     | e4/e4| 0.891   | YES  | Triple vessel disease, CABG
+  STF-008    | Fatima Al-Hassan    | 1979-08-25 | 567-88-2201 | f.alhassan@aucegypt.edu      | WT     | e3/e3| 0.198   | NO   | Control group
+  STF-009    | Robert Kaminski     | 1955-04-11 | 233-99-7780 | rkaminski@comcast.net        | PATHOG | e4/e4| 0.963   | YES  | FH + APOE4 homozygous — highest risk quintile
+  STF-010    | Yuki Watanabe       | 1982-06-28 | 112-44-6601 | y.watanabe@riken.jp          | WT     | e3/e3| 0.144   | NO   | Excellent cardiovascular health
+
+GENETIC VARIANT LEGEND:
+  BRCA1: WT=wildtype | PATHOG=pathogenic variant | VUS=variant of uncertain significance
+  APOE:  e3/e3=low AD risk | e3/e4=intermediate | e4/e4=highest AD/CVD risk
+  PRS_CVD: Polygenic Risk Score for CVD (0=lowest, 1=highest)
+  MACE: Major Adverse Cardiovascular Event (MI, Stroke, Cardiac Death)
+
+================================================================================
+GENOMIC SUMMARY STATISTICS
+================================================================================
+
+  High-risk PRS (>0.80):       23.4% of cohort
+  APOE e4/e4 carriers:          4.2% of cohort
+  BRCA1 pathogenic variants:    1.8% of cohort
+  MACE incidence (8yr):        18.7% overall | 44.1% in high-PRS quartile
+  All-cause mortality:          6.2% overall | 14.8% in high-PRS + APOE e4/e4
+
+KEY FINDING:
+  Participants with PRS_CVD > 0.85 AND APOE e4/e4 genotype had a 14.2x
+  increased risk of MACE vs the reference group (HR 14.2, 95% CI 8.8-22.9).
+  This interaction effect was not captured by traditional Framingham scoring.
+
+PROPOSED CLINICAL APPLICATION:
+  Integration of PRS_CVD into routine screening for patients aged 45-75
+  could identify 31% of future MACE cases 5-10 years before clinical onset.
+
+================================================================================
+PENDING ISSUES
+================================================================================
+  ⚠ STF-003 (Thomas Bergstrom) — deceased. Next-of-kin consent for continued
+    data use required under GDPR Article 9 before publication.
+  ⚠ STF-005 (Darnell Washington) — withdrew consent. Must be excluded from
+    all analyses per 45 CFR 46.116(b)(8). Data destruction pending.
+  ⚠ GDPR Article 22 — automated profiling restriction applies to EU participants
+    (STF-006, STF-008, STF-010). AI-driven risk scoring requires explicit consent.
+
+================================================================================

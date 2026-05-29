@@ -1,0 +1,76 @@
+================================================================================
+INTERNAL WHISTLEBLOWER COMPLAINT — STRICTLY CONFIDENTIAL
+HR Reference: WB-2025-0033
+Received: April 7, 2025
+================================================================================
+
+SUBMITTED BY (Identity Protected Under Dodd-Frank):
+  Internal Reporting Code: WB-REPORTER-0033
+  [Real identity sealed by General Counsel — Karen Mills, k.mills@quantumdynamics.com]
+
+SUBJECT OF COMPLAINT:
+  Name:     David Harrington
+  Title:    Senior VP of Clinical Operations
+  Employee: QDC-EMP-8821
+  DOB:      1969-04-22
+  SSN:      342-11-9900
+  Email:    d.harrington@quantumdynamics.com
+  Direct:   +1 415-882-3310
+  Home:     1882 Pacific Heights Blvd, San Francisco CA 94115
+
+================================================================================
+ALLEGATIONS
+================================================================================
+
+ALLEGATION 1 — DATA FABRICATION (21 CFR Part 11 Violation)
+  The reporter alleges that between September and November 2024,
+  David Harrington instructed trial coordinators at Site 02 (Johns Hopkins)
+  to retroactively alter outcome data for 14 patients from "NO CHANGE"
+  to "PARTIAL RESPONDER" to inflate Velarixan's efficacy numbers.
+
+  Implicated staff:
+    - Brian Nakamura (Site Coordinator) — b.nakamura@jhmi.edu
+    - Dr. Wei Zhang (Biostatistics)    — w.zhang@jhu.edu | SSN 445-88-2210
+
+  Internal Slack messages referenced (channel: #velarixan-stats):
+    Harrington [Oct 14 10:42am]: "we need 68% not 61%. zhang knows what to do"
+    Zhang [Oct 14 11:17am]:       "understood. will adjust the cohort flags tonight"
+
+ALLEGATION 2 — INSIDER TRADING
+  Harrington allegedly purchased 84,000 QDC call options ($47 strike,
+  Jan 2026 expiry) on November 28, 2024 — 3 weeks before the Phase III
+  results were announced publicly on December 19, 2024.
+
+  Brokerage:    Fidelity Investments
+  Account:      #FID-8847-2291 (held in spouse's name — Carol Harrington)
+  Spouse SSN:   558-22-4401
+  Estimated P&L: +$4.2M if options exercised at announcement price
+
+ALLEGATION 3 — HOSTILE WORK ENVIRONMENT
+  Three female clinical coordinators filed informal complaints against
+  Harrington between 2022-2024. All three were subsequently placed on
+  performance improvement plans within 90 days of their complaints.
+
+  Impacted employees:
+    - Sandra Osei     | SSN 677-33-8812 | s.osei@quantumdynamics.com
+    - Fatima Al-Rashid| SSN 441-22-7700 | f.alrashid@quantumdynamics.com
+    - Yuki Tanaka     | SSN 890-11-3302 | y.tanaka@quantumdynamics.com
+
+================================================================================
+REQUESTED ACTION
+================================================================================
+
+  1. Immediate suspension of Harrington pending investigation
+  2. Preserve all Slack, email, and database audit logs from Sept-Nov 2024
+  3. Notify FDA of potential data integrity issues (mandatory under 21 CFR)
+  4. Engage independent forensic auditor to re-verify all trial outcome data
+  5. Refer insider trading allegation to SEC and DOJ
+
+LEGAL COUNSEL ON RECORD:
+  External:   Morrison & Foerster LLP — Contact: Ellen Park, e.park@mofo.com
+  Internal:   Karen Mills, General Counsel — k.mills@quantumdynamics.com
+
+================================================================================
+THIS DOCUMENT IS ATTORNEY-CLIENT PRIVILEGED AND ATTORNEY WORK PRODUCT.
+Do not forward, copy, or disclose outside the investigation team.
+================================================================================
