@@ -1,0 +1,118 @@
+================================================================================
+PHASE III CLINICAL TRIAL — FINAL STUDY REPORT
+CONFIDENTIAL — SPONSOR EYES ONLY
+================================================================================
+
+STUDY TITLE:   A Randomized, Double-Blind, Placebo-Controlled Phase III Trial
+               Evaluating the Efficacy and Safety of Velarixan 50mg in Adults
+               with Treatment-Resistant Type 2 Diabetes Mellitus
+
+SPONSOR:       NovaBio Therapeutics Inc.
+               88 Biotech Circle, San Diego, CA 92101
+               EIN: 83-1204567
+
+PRINCIPAL INVESTIGATOR:
+               Dr. James Okonkwo, MD, PhD
+               Email: j.okonkwo@novabio.tech
+               Direct: +1 619-774-3320
+               DEA Registration: AO3421881
+
+CO-INVESTIGATORS:
+               Dr. Rachel Goldstein — Endocrinology, Mayo Clinic
+               Email: r.goldstein@mayoclinic.org | NPI: 1234567890
+               Dr. Wei Zhang — Biostatistics, Johns Hopkins
+               Email: w.zhang@jhu.edu | SSN (IRB authorization): 445-88-2210
+
+IRB APPROVAL:  IRB-2023-NB-0041 | Approved: Feb 2, 2023
+FDA IND:       IND-147821
+STUDY PERIOD:  March 2023 — December 2024
+
+================================================================================
+PATIENT ENROLLMENT — SITE LEVEL DATA
+================================================================================
+
+SITE 01 — Mayo Clinic, Rochester MN
+Site Coordinator: Amanda Torres | amanda.torres@mayo.edu | 507-284-8822
+Enrolled: 312 patients
+
+  Patient ID   Age  Sex  HbA1c  BMI   Systolic  Glucose  Arm         Outcome
+  ----------   ---  ---  -----  ----  --------  -------  ----------  -------
+  MC-001       58   M    9.2    32.1  148       187      Velarixan   RESPONDER
+  MC-002       64   F    8.7    29.4  138       161      Placebo     NO CHANGE
+  MC-003       71   M    10.1   34.7  162       201      Velarixan   RESPONDER
+  MC-004       47   F    7.9    27.2  121       132      Velarixan   RESPONDER
+  MC-005       69   M    11.4   38.2  171       228      Placebo     DROPOUT (AE)
+  MC-006       55   F    8.1    30.9  134       144      Velarixan   PARTIAL
+  MC-007       62   M    9.6    33.4  155       196      Placebo     NO CHANGE
+  MC-008       73   F    10.8   35.1  168       218      Velarixan   RESPONDER
+
+  Patient PII on file (IRB secured):
+  MC-001: Harold Simmons  | SSN 342-77-9021 | harold.simmons@gmail.com
+  MC-002: Patricia Moore  | SSN 556-33-8812 | p.moore@outlook.com
+  MC-003: Eugene Banks    | SSN 231-44-7701 | ebanks@yahoo.com
+  MC-004: Cynthia Alvarez | SSN 678-22-4490 | c.alvarez@icloud.com
+  MC-005: George Winters  | SSN 445-11-3302 | gwinters@hotmail.com
+  MC-006: Denise Franklin | SSN 789-55-6611 | dfranklin@gmail.com
+  MC-007: Curtis Hall     | SSN 321-88-5500 | chall99@gmail.com
+  MC-008: Miriam Osei     | SSN 567-44-2210 | m.osei@nhs.uk
+
+SITE 02 — Johns Hopkins Hospital, Baltimore MD
+Site Coordinator: Brian Nakamura | b.nakamura@jhmi.edu | 410-955-5000
+Enrolled: 287 patients
+
+  Patient ID   Age  Sex  HbA1c  BMI   Systolic  Glucose  Arm         Outcome
+  ----------   ---  ---  -----  ----  --------  -------  ----------  -------
+  JH-001       51   F    8.3    28.7  127       141      Velarixan   RESPONDER
+  JH-002       67   M    9.9    36.2  158       199      Velarixan   RESPONDER
+  JH-003       43   F    7.6    25.1  118       112      Placebo     NO CHANGE
+  JH-004       76   M    11.2   37.8  174       233      Velarixan   PARTIAL
+  JH-005       59   F    8.8    31.4  139       167      Placebo     DROPOUT (lost to follow-up)
+  JH-006       62   M    9.1    33.0  147       182      Velarixan   RESPONDER
+
+  Patient PII on file:
+  JH-001: Angela Price    | SSN 233-66-8801 | angela.price@gmail.com
+  JH-002: Raymond Tucker  | SSN 112-77-4490 | rtucker@comcast.net
+  JH-003: Keisha Grant    | SSN 445-99-3321 | kgrant@yahoo.com
+  JH-004: Walter Hoffman  | SSN 678-33-1102 | whoffman@aol.com
+  JH-005: Sophia Lin      | SSN 891-22-6670 | slin88@gmail.com
+  JH-006: Marcus Webb     | SSN 234-55-9980 | mwebb@outlook.com
+
+================================================================================
+PRIMARY EFFICACY RESULTS
+================================================================================
+
+PRIMARY ENDPOINT: HbA1c reduction ≥ 1.5% at week 52
+
+  Arm           N    Responders  Response Rate  Mean HbA1c Drop  p-value
+  ----------    ---  ----------  -------------  ---------------  -------
+  Velarixan     301  211         70.1%          -2.31%           <0.001
+  Placebo       298  47          15.8%          -0.44%           (ref)
+
+  Number Needed to Treat (NNT): 1.85
+  Absolute Risk Reduction: 54.3%
+  Relative Risk Reduction: 71.5%
+
+SECONDARY ENDPOINTS:
+  - Fasting glucose reduction: -44.2 mg/dL (Velarixan) vs -6.1 mg/dL (Placebo)
+  - Weight reduction: -3.8 kg (Velarixan) vs +0.4 kg (Placebo)
+  - Systolic BP reduction: -8.2 mmHg (Velarixan) vs -1.1 mmHg (Placebo)
+
+SERIOUS ADVERSE EVENTS:
+  - Pancreatitis: 3 cases (Velarixan arm) — causal relationship under review
+  - Hypoglycemia grade 3+: 7 cases (Velarixan) vs 1 case (Placebo)
+  - Death: 1 (MC-005, Placebo arm — cardiac event, unrelated per DSMB review)
+
+================================================================================
+REGULATORY STATUS
+================================================================================
+
+  FDA NDA Submission Target:   Q2 2025
+  Priority Review Designation: Requested (Fast Track granted Feb 2024)
+  Patent Coverage:             NB-2021-0044 (expires 2038)
+  Estimated Market Size:       $14.2B annually (US + EU combined)
+  Projected Launch Price:      $8,400/year per patient
+
+CONFIDENTIAL — Property of NovaBio Therapeutics Inc.
+Distribution restricted to named recipients only.
+Unauthorized disclosure may violate 21 CFR Part 11 and SEC Regulation FD.
+================================================================================

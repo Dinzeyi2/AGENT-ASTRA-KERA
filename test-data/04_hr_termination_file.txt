@@ -1,0 +1,116 @@
+================================================================================
+QUANTUM DYNAMICS CORP — HUMAN RESOURCES
+EMPLOYEE TERMINATION & SEPARATION PACKAGE FILE
+CLASSIFICATION: HR CONFIDENTIAL — LEGAL HOLD
+================================================================================
+
+File Reference:   HR-TERM-2025-0041
+Date Initiated:   April 9, 2025
+Prepared by:      Karen Mills, General Counsel | k.mills@quantumdynamics.com
+HR Business Partner: Tanya Reid | t.reid@quantumdynamics.com | ext 4421
+
+================================================================================
+EMPLOYEE INFORMATION
+================================================================================
+
+  Full Name:          David Alan Harrington
+  Employee ID:        QDC-EMP-8821
+  SSN:                342-11-9900
+  Date of Birth:      April 22, 1969
+  Home Address:       1882 Pacific Heights Blvd, San Francisco CA 94115
+  Personal Email:     d.harrington.personal@gmail.com
+  Work Email:         d.harrington@quantumdynamics.com
+  Personal Mobile:    +1 415-882-3310
+  Emergency Contact:  Carol Harrington (spouse) | +1 415-882-4401 | carol.h@gmail.com
+
+  Title:              Senior VP, Clinical Operations
+  Department:         R&D / Clinical Development
+  Start Date:         March 14, 2016
+  Base Salary:        $387,000/year
+  Last Bonus:         $124,000 (FY2024, paid February 2025)
+  Unvested RSUs:      42,800 shares @ $88.40 avg grant price
+  401(k) Balance:     $1,247,881 (Vanguard, acct #VG-8847-221)
+
+================================================================================
+REASON FOR TERMINATION
+================================================================================
+
+  Category:     FOR CAUSE — Gross Misconduct
+  Effective:    April 10, 2025 (immediate)
+
+  Summary of cause:
+    Following internal investigation (WB-2025-0033), the company has
+    determined with reasonable certainty that Harrington:
+
+    1. Directed falsification of Phase III clinical trial outcome data
+       in violation of 21 CFR Part 11 and company policy
+    2. Engaged in insider trading using material non-public information
+       regarding Velarixan trial results (referral to SEC pending)
+    3. Created a hostile work environment for at minimum three direct reports
+       between 2022-2024 and retaliated against complainants
+
+================================================================================
+SEPARATION TERMS
+================================================================================
+
+  Severance offered:     NONE (for-cause termination)
+  COBRA offered:         Yes — 18 months, employee premium
+  Non-disparagement:     Required as condition of reference letter
+  Non-compete:           24 months — biotech, pharma, gene therapy
+                         Enforced under CA law (note: may be unenforceable —
+                         seek outside counsel opinion before finalizing)
+
+  Equity treatment:
+    Unvested RSUs:       FORFEITED immediately
+    Vested options:      90-day exercise window from termination date
+    Clawback triggered:  Yes — FY2024 bonus ($124,000) subject to recovery
+                         under Dodd-Frank clawback policy
+
+  Systems access:        Revoked April 10, 2025 at 08:00 AM PT
+  Building access:       Security escort required for personal effects retrieval
+                         Scheduled: April 11, 2025 at 10:00 AM, Lobby C
+
+================================================================================
+LEGAL EXPOSURE & HOLDS
+================================================================================
+
+  Document hold:         ALL Harrington communications 2022-present
+  Devices to preserve:   MacBook Pro (SN: C02XG1JHJGH5), iPhone 14 Pro,
+                         iPad Pro, home office laptop (if company property)
+  Outside counsel:       Morrison & Foerster LLP
+  Estimated litigation reserve:  $8.5M — $22M depending on DOJ/SEC involvement
+  D&O Insurance:         Notified — carrier: Chubb, policy #DO-4421-9988
+
+  INTERNAL NOTE (attorney-client privileged):
+  Do NOT inform Harrington of SEC referral before termination meeting.
+  Preserve all Slack workspace exports before his access is revoked.
+  Per Ellen Park (MoFo): "Do not delete anything. Litigation hold is active."
+
+================================================================================
+TERMINATION MEETING LOG
+================================================================================
+
+  Date/Time:  April 10, 2025 | 9:00 AM PT
+  Location:   QDC HQ, 1200 Innovation Drive, Palo Alto CA — Conference Room B
+  Present:    Karen Mills (GC), Tanya Reid (HR), Security Officer James Lau
+
+  Employee response:  "This is retaliation for blowing the whistle on the
+                       board's decision to rush the NDA. You'll be hearing
+                       from my lawyer."
+  Employee's attorney: Announced as Benjamin Gould, Cooley LLP
+                       b.gould@cooley.com | +1 415-693-2190
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+  [ ] File SEC whistleblower tip (Harrington's allegation about board — evaluate)
+  [ ] FDA notification regarding data integrity (21 CFR Part 312.62)
+  [ ] Coordinate with MoFo on civil litigation strategy
+  [ ] HR to process final paycheck (through April 10 only, no PTO payout)
+  [ ] Notify clinical trial sites — Dr. Okonkwo to assume interim oversight
+
+================================================================================
+THIS DOCUMENT IS SUBJECT TO LEGAL HOLD.
+ATTORNEY-CLIENT PRIVILEGED AND ATTORNEY WORK PRODUCT.
+================================================================================

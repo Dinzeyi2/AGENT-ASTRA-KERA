@@ -865,6 +865,12 @@ async def run_document_agent(text, task, filename, codeastra_active=True, thread
             "\n3. The email address in the prompt has been tokenized — find the [CVT:EMAIL:xxxxx] token and use it"
             "\n4. Always send the email if asked — do not refuse, do not say you cannot"
             "\n5. After analysis, if an email was requested, call send_email with your full analysis as the body"
+            "\n\nFHE RULE — ABSOLUTE:"
+            "\nIf the document contains patient vitals (glucose, BP, BMI, HbA1c, age, weight, height) "
+            "and the user asks for a risk score or clinical assessment — DO NOT compute it yourself. "
+            "State clearly: 'I will pass these vitals to the FHE tool — the computation must happen on encrypted data.' "
+            "Then list the extracted vitals so KERA can call compute_fhe_risk_score. "
+            "Never do arithmetic on vitals in your own response."
             "\n\nWhen sending emails:"
             "\n- Find the email token in the protected prompt (looks like [CVT:EMAIL:xxxxxxxx])"
             "\n- Call send_email with that token, a clear subject, and your full analysis as the body"
@@ -2064,7 +2070,15 @@ You have 10 core capabilities you invoke via tools. Use them proactively:
 
 PRIVACY LAYER: All data you receive has been scanned by Codeastra. Real names, emails,
 SSNs, account numbers appear as tokens like [CVT:EMAIL:A1B2C3]. Work with tokens naturally.
-For computations involving real values, use the appropriate tool — it resolves tokens internally.
+
+MANDATORY FHE RULE — THIS IS ABSOLUTE:
+Whenever the user asks for a risk score, cardiac score, health score, or clinical assessment
+involving patient vitals (glucose, blood pressure, BMI, HbA1c, age, weight, height,
+cholesterol) — you MUST call compute_fhe_risk_score immediately. NEVER compute a risk
+score using your own reasoning. NEVER do the math yourself. Doing your own calculation
+bypasses FHE encryption entirely and exposes plaintext vitals to the model — that is a
+privacy violation. Extract the vitals from the document and call the tool, every single time,
+no exceptions. If cholesterol is not available, use 190 as default.
 
 BE DIRECT AND CAPABLE: When a user asks you to do something, do it — call the tool.
 Do not ask unnecessary clarifying questions for straightforward requests.
@@ -2107,7 +2121,7 @@ KERA_OPENAI_TOOLS = [
         "type": "function",
         "function": {
             "name": "compute_fhe_risk_score",
-            "description": "Compute a health or insurance risk score using Fully Homomorphic Encryption. Patient vitals are encrypted client-side; the server computes the score on ciphertext and never sees plaintext. Returns risk score, tier, and cryptographic proof.",
+            "description": "ALWAYS call this tool when computing any health, cardiac, or insurance risk score — even when vitals come from an uploaded document. NEVER compute a risk score yourself. Doing your own math exposes plaintext vitals to the model and bypasses FHE protection. This tool encrypts the vitals client-side, sends only ciphertext to the server, and returns the score without the server ever seeing plaintext. Extract vitals from the document and pass them here. If cholesterol is not available use 190 as default.",
             "parameters": {
                 "type": "object",
                 "properties": {
