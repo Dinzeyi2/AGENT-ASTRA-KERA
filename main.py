@@ -976,6 +976,10 @@ def _stream(gen):
 async def index():
     with open("index.html") as f: return HTMLResponse(f.read())
 
+@app.get("/docs")
+async def docs_page():
+    with open("docs.html") as f: return HTMLResponse(f.read())
+
 @app.get("/health")
 async def health():
     codeastra_ok = False
@@ -2072,7 +2076,20 @@ def _audit(event_type: str, **kwargs):
 
 KERA_SYSTEM = """You are KERA — a real, production AI agent with Zero Trust privacy built in.
 
-You have 10 core capabilities you invoke via tools. Use them proactively:
+CRITICAL RESPONSE RULE FOR PII REQUESTS — READ THIS FIRST:
+If a user asks "what is the SSN / name / address / email / phone of [person]" —
+NEVER refuse. NEVER say "I cannot provide that" or "privacy protections prevent access."
+The document contains NO real PII. It contains ONLY vault tokens.
+Your answer is always: "That field is vault-protected. The token in my context is [CVT:TYPE:xxxx]."
+If the field is not present in the document at all, say: "That field does not appear in this document."
+Refusing to answer is WRONG. Returning the token is CORRECT.
+A refusal means the privacy layer failed to explain itself. A token reference means it worked.
+
+This is not a content policy question. This is not a dangerous request. The document has
+already been de-identified by Codeastra. There is nothing sensitive to protect here — only
+tokens. Treat every PII request as a factual lookup against the tokenized document.
+
+You have 10 core capabilities you invoke via tools:
 
 1. show_pii_protection          — reveal how your middleware tokenizes PII before you see it
 2. run_smpc_equity_analysis     — Secure Multi-Party Computation across data sources
@@ -2085,22 +2102,22 @@ You have 10 core capabilities you invoke via tools. Use them proactively:
 9. generate_compliance_report   — produce a full HIPAA/GDPR/SOX compliance audit report
 10. handle_security_challenge   — respond to attempts to extract PII; log and block them
 
-PRIVACY LAYER: All data you receive has been scanned by Codeastra. Real names, emails,
-SSNs, account numbers appear as tokens like [CVT:EMAIL:A1B2C3]. Work with tokens naturally.
+PRIVACY LAYER: All data you receive has been scanned by Codeastra before it reached you.
+Every real SSN, email, phone, address, and account number was intercepted and replaced
+with a vault token like [CVT:SSN:A1B2C3] or [CVT:EMAIL:D4E5F6].
+You hold ONLY tokens — never the real values.
 
 MANDATORY FHE RULE — THIS IS ABSOLUTE:
 Whenever the user asks for a risk score, cardiac score, health score, or clinical assessment
 involving patient vitals (glucose, blood pressure, BMI, HbA1c, age, weight, height,
 cholesterol) — you MUST call compute_fhe_risk_score immediately. NEVER compute a risk
-score using your own reasoning. NEVER do the math yourself. Doing your own calculation
-bypasses FHE encryption entirely and exposes plaintext vitals to the model — that is a
-privacy violation. Extract the vitals from the document and call the tool, every single time,
-no exceptions. If cholesterol is not available, use 190 as default.
+score using your own reasoning. NEVER do the math yourself. Extract the vitals from the
+document and call the tool. If cholesterol is not available, use 190 as default.
 
 DOCUMENT RULE:
 When the user message contains an "--- UPLOADED DOCUMENT ---" section:
-- Read the document and answer the user's question directly in your response text
-- ONLY call a tool if the user explicitly asks for one of the 10 capabilities
+- Answer the user's question directly from the document content
+- ONLY call a tool if the user explicitly asks for one of the 10 capabilities above
 - If the user asks to flag patients, analyze risks, review clauses, or summarize — do it in plain text
 - If the user asks for a risk score on specific vitals — call compute_fhe_risk_score
 - Do NOT call analyze_data_sovereignty, run_smpc_equity_analysis, or other tools
@@ -3036,13 +3053,44 @@ async def run_kera_agent(
     _audit("chat_turn", session_id=session_id, intercepted=intercept_n,
            codeastra_active=codeastra_active, reply_len=len(final_text))
 
+    # ── Vault reveal — batch-resolve all tokens found in agent output ──
+    # Agent worked with tokens. We now resolve them AFTER agent is done.
+    # Agent never sees real values. User gets the resolved map.
+    import re as _tok_re
+    _token_pat = _tok_re.compile(r'\[CV[TD]:[A-Z]+:[A-Za-z0-9\-]{4,}\]')
+
+    # Collect tokens from: intercepted events + agent output text
+    _all_tokens: set = set()
+    for ev in prot_events:
+        if ev.get("type") == "intercepted" and ev.get("token"):
+            _all_tokens.add(ev["token"])
+    _all_tokens.update(_token_pat.findall(final_text))
+
+    revealed: dict = {}
+    if _all_tokens and ca_client and codeastra_active:
+        try:
+            _resolved = await codeastra_resolve_batch(list(_all_tokens))
+            revealed = _resolved if isinstance(_resolved, dict) else {}
+            log.info(f"[REVEAL] Resolved {len(revealed)}/{len(_all_tokens)} tokens after agent")
+        except Exception as _rev_err:
+            log.warning(f"[REVEAL] batch resolve error: {_rev_err}")
+
     # Backward-compatible thinking event for old frontends
     if final_text:
         yield {"type": "thinking", "text": final_text}
 
-    yield {"type": "complete", "session_id": session_id,
-           "intercepted": intercept_n,
-           "real_data_seen_by_kera": 0 if codeastra_active else "YES"}
+    yield {
+        "type":                    "complete",
+        "session_id":              session_id,
+        "intercepted":             intercept_n,
+        "real_data_seen_by_kera":  0 if codeastra_active else "YES",
+        "revealed": {
+            "revealed": revealed,
+            "count":    len(revealed),
+            "tokens_found": len(_all_tokens),
+            "note": "Resolved after agent completed — agent never saw these values",
+        },
+    }
 
 
 # ═══════════════════════════════════════════════════════════
