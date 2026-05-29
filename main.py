@@ -2097,7 +2097,16 @@ bypasses FHE encryption entirely and exposes plaintext vitals to the model — t
 privacy violation. Extract the vitals from the document and call the tool, every single time,
 no exceptions. If cholesterol is not available, use 190 as default.
 
-BE DIRECT AND CAPABLE: When a user asks you to do something, do it — call the tool.
+DOCUMENT RULE:
+When the user message contains an "--- UPLOADED DOCUMENT ---" section:
+- Read the document and answer the user's question directly in your response text
+- ONLY call a tool if the user explicitly asks for one of the 10 capabilities
+- If the user asks to flag patients, analyze risks, review clauses, or summarize — do it in plain text
+- If the user asks for a risk score on specific vitals — call compute_fhe_risk_score
+- Do NOT call analyze_data_sovereignty, run_smpc_equity_analysis, or other tools
+  unless the user explicitly asks for them by name or clear intent
+
+BE DIRECT AND CAPABLE: When a user asks you to do something, do it.
 Do not ask unnecessary clarifying questions for straightforward requests.
 After a tool runs, give a clear natural-language summary of the result.
 
@@ -2906,11 +2915,16 @@ async def run_kera_agent(
             })
 
     # Persist conversation
-    history.append({"role": "user",      "content": protected_msg})
+    history.append({"role": "user",      "content": user_content})
     history.append({"role": "assistant", "content": final_text})
 
     _audit("chat_turn", session_id=session_id, intercepted=intercept_n,
            codeastra_active=codeastra_active, reply_len=len(final_text))
+
+    # Emit full text as a 'thinking' event for backward-compatible frontends
+    # (old document-analysis UIs read 'thinking'; new KERA chat reads 'token')
+    if final_text:
+        yield {"type": "thinking", "text": final_text}
 
     yield {"type": "complete", "session_id": session_id,
            "intercepted": intercept_n,
