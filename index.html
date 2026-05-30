@@ -594,6 +594,7 @@ function handleEvent(ev, bubbleId, bubbleWrap){
   else if(ev.type==='synthetic_dataset') renderSynthetic(ev, h);
   else if(ev.type==='compliance_report') renderComplianceReport(ev.report, h);
   else if(ev.type==='security_challenge') renderSecurityChallenge(ev, h);
+  else if(ev.type==='complete')          renderVaultReveal(ev, h);
 }
 
 // ═══════════════════════════════════════════════
@@ -814,6 +815,29 @@ function renderSecurityChallenge(ev, h){
       <div style="margin-top:8px;font-size:8px;color:var(--t2)">Real PII extracted: <strong class="g">${ev.pii_extracted||0}</strong> · Attempt logged to audit trail</div>
     </div>`);
   appendCard(el,h);
+}
+
+function renderVaultReveal(ev, h){
+  const revealed = (ev.revealed && ev.revealed.revealed) ? ev.revealed.revealed : {};
+  const entries  = Object.entries(revealed);
+  if(!entries.length) return;
+  let rows = '';
+  for(const [token, real] of entries){
+    rows += `<tr>
+      <td class="ba-tok" style="word-break:break-all">${esc(token)}</td>
+      <td class="ba-raw" style="font-weight:700">${esc(String(real))}</td>
+    </tr>`;
+  }
+  const el = card(`VAULT REVEAL — ${entries.length} VALUE${entries.length>1?'S':''} RESOLVED (AI NEVER SAW THESE)`, 'y',
+    `<table class="ba-table">
+      <thead><tr>
+        <th class="g">TOKEN (what KERA saw)</th>
+        <th class="r">REAL VALUE (vault → you)</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="font-size:8px;color:var(--t2);margin-top:8px">Resolved by Codeastra vault after KERA completed — KERA only ever held the tokens above.</div>`);
+  appendCard(el, h);
 }
 
 function restoreCard(cardData){
